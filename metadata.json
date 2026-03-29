@@ -1,0 +1,5 @@
+{
+  "name": "Microstock AI Tools",
+  "description": "Batch image generation, image-to-prompt analysis, and microstock metadata generator with CSV export.",
+  "requestFramePermissions": []
+}
