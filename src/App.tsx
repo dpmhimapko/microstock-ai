@@ -755,7 +755,7 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
 21. Travel`;
 
         const response = await ai.models.generateContent({
-          model: "gemini-2.0-flash-latest",
+          model: "gemini-3-flash-preview",
           contents: {
             parts: [
               { inlineData: { data: base64.split(',')[1], mimeType: file.type } },
