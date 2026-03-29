@@ -145,7 +145,7 @@ export default function App() {
       {/* Footer */}
       <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 border-t border-gray-200 mt-12">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-gray-400 text-sm">
-          <p>© 2026 Microstock AI Tools. Powered by Gemini 3.1 Pro & Flash Image.</p>
+          <p>© 2026 Microstock AI Tools. Powered by Gemini 3.1 Pro & Flash.</p>
           <div className="flex gap-6">
             <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="hover:text-black transition-colors flex items-center gap-1">
               Billing Info <ExternalLink size={12} />
@@ -409,6 +409,7 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
 
 function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
   const [concept, setConcept] = useState('');
+  const [brief, setBrief] = useState('');
   const [count, setCount] = useState<number | string>(5);
   const [isCustom, setIsCustom] = useState(false);
   const [results, setResults] = useState<string[]>([]);
@@ -472,6 +473,7 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
       parts.push({
         text: `Generate ${finalCount} high-quality, detailed AI image generation prompts.
         ${concept ? `Base them on this concept: "${concept}".` : "Base them on the provided image."}
+        ${brief ? `ADDITIONAL BRIEF/INSTRUCTIONS: "${brief}". You MUST strictly follow these instructions in every generated prompt.` : ""}
         
         CRITICAL RULES:
         1. SUBJECT CONSISTENCY: You MUST maintain the EXACT SAME SUBJECT as seen in the reference image or described in the concept. If it's a "businessman", every prompt MUST be about a "businessman". Do NOT change the subject to a doctor, artist, or anything else.
@@ -531,7 +533,17 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
                 value={concept}
                 onChange={(e) => setConcept(e.target.value)}
                 placeholder="Contoh: Kucing astronot di planet mars..."
-                className="w-full h-32 p-4 text-sm border border-gray-200 rounded-2xl focus:ring-2 focus:ring-black focus:border-transparent outline-none transition-all resize-none"
+                className="w-full h-24 p-4 text-sm border border-gray-200 rounded-2xl focus:ring-2 focus:ring-black focus:border-transparent outline-none transition-all resize-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Brief / Instruksi Tambahan (Opsional)</label>
+              <textarea
+                value={brief}
+                onChange={(e) => setBrief(e.target.value)}
+                placeholder="Contoh: Tambahkan gaya neon, buat suasana gelap, atau instruksi khusus lainnya..."
+                className="w-full h-24 p-4 text-sm border border-gray-200 rounded-2xl focus:ring-2 focus:ring-black focus:border-transparent outline-none transition-all resize-none"
               />
             </div>
 
@@ -743,7 +755,7 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
 21. Travel`;
 
         const response = await ai.models.generateContent({
-          model: "gemini-3.1-pro-preview",
+          model: "gemini-3-flash-preview",
           contents: {
             parts: [
               { inlineData: { data: base64.split(',')[1], mimeType: file.type } },
