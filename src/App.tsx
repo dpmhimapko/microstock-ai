@@ -415,6 +415,22 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
   const [copiedAll, setCopiedAll] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string>('');
+  const [selectedVariations, setSelectedVariations] = useState<string[]>(['pose', 'background']);
+
+  const variationOptions = [
+    { id: 'pose', label: 'Pose & Action' },
+    { id: 'background', label: 'Background' },
+    { id: 'lighting', label: 'Lighting' },
+    { id: 'camera', label: 'Camera Angle' },
+    { id: 'mood', label: 'Color & Mood' },
+    { id: 'expression', label: 'Expression' },
+  ];
+
+  const toggleVariation = (id: string) => {
+    setSelectedVariations(prev => 
+      prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]
+    );
+  };
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const selectedFile = acceptedFiles[0];
@@ -438,6 +454,7 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
       const apiKey = customApiKey || process.env.GEMINI_API_KEY;
       const ai = new GoogleGenAI({ apiKey });
       const finalCount = isCustom ? Number(count) : count;
+      const variationsText = selectedVariations.map(v => variationOptions.find(opt => opt.id === v)?.label).join(', ');
       
       const parts: any[] = [];
       
@@ -454,9 +471,12 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
       parts.push({
         text: `Generate ${finalCount} high-quality, detailed AI image generation prompts.
         ${concept ? `Base them on this concept: "${concept}".` : "Base them on the provided image."}
-        ${file ? `CRITICAL: You MUST strictly follow the visual style, medium (e.g., 2D vector, 3D render, oil painting, photography), artistic technique, and background characteristics (e.g., plain white background, isolated on white) of the provided reference image. If the image is a 2D vector illustration, all generated prompts MUST be for 2D vector illustrations.` : ""}
-        While the subjects can vary slightly to provide diversity, the artistic style and medium MUST remain consistent with the reference image.
-        Return ONLY a JSON array of strings, no other text.`
+        
+        CRITICAL RULES:
+        1. SUBJECT CONSISTENCY: You MUST maintain the EXACT SAME SUBJECT as seen in the reference image or described in the concept. If it's a "businessman", every prompt MUST be about a "businessman". Do NOT change the subject to a doctor, artist, or anything else.
+        2. STYLE CONSISTENCY: ${file ? `You MUST strictly follow the visual style, medium (e.g., 2D vector, 3D render, photography), artistic technique, and background characteristics of the reference image.` : "Maintain a consistent artistic style across all prompts."}
+        3. VARIATIONS: Create diversity by varying ONLY the following aspects: ${variationsText || "general composition"}.
+        4. FORMAT: Return ONLY a JSON array of strings, no other text.`
       });
 
       const response = await ai.models.generateContent({
@@ -554,6 +574,26 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
                     />
                   )}
                 </div>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <label className="block text-sm font-medium text-gray-700 mb-3">Variasi yang Diinginkan</label>
+              <div className="flex flex-wrap gap-2">
+                {variationOptions.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => toggleVariation(opt.id)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-medium border transition-all",
+                      selectedVariations.includes(opt.id)
+                        ? "bg-gray-100 text-black border-black"
+                        : "bg-white text-gray-400 border-gray-100 hover:border-gray-200"
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
