@@ -33,6 +33,7 @@ interface GeneratedImage {
   prompt: string;
   url: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
+  aspectRatio: AspectRatio;
   error?: string;
 }
 
@@ -41,6 +42,7 @@ interface MetadataItem {
   filename: string;
   title: string;
   keywords: string;
+  category: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
   previewUrl: string;
 }
@@ -203,7 +205,8 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
       id: Math.random().toString(36).substr(2, 9),
       prompt: p,
       url: '',
-      status: 'pending'
+      status: 'pending',
+      aspectRatio: aspectRatio
     }));
     setImages(prev => [...newImages, ...prev]);
 
@@ -349,7 +352,14 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {images.map((img) => (
               <div key={img.id} className="bg-white rounded-2xl overflow-hidden border border-gray-200 group shadow-sm">
-                <div className="aspect-square bg-gray-50 relative flex items-center justify-center overflow-hidden">
+                <div className={cn(
+                  "bg-gray-50 relative flex items-center justify-center overflow-hidden",
+                  img.aspectRatio === "1:1" && "aspect-square",
+                  img.aspectRatio === "3:4" && "aspect-[3/4]",
+                  img.aspectRatio === "4:3" && "aspect-[4/3]",
+                  img.aspectRatio === "9:16" && "aspect-[9/16]",
+                  img.aspectRatio === "16:9" && "aspect-video"
+                )}>
                   {img.status === 'processing' && (
                     <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-10">
                       <Loader2 className="animate-spin text-black mb-2" size={32} />
@@ -642,6 +652,7 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
       filename: file.name,
       title: '',
       keywords: '',
+      category: '',
       status: 'pending',
       previewUrl: URL.createObjectURL(file)
     }));
@@ -667,12 +678,35 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
 
       try {
         const base64 = await fileToBase64(file);
+        const categoriesList = `
+1. Animals
+2. Buildings and Architecture
+3. Business
+4. Drinks
+5. The Environment
+6. States of Mind
+7. Food
+8. Graphic Resources
+9. Hobbies and Leisure
+10. Industry
+11. Landscapes
+12. Lifestyle
+13. People
+14. Plants and Flowers
+15. Culture and Religion
+16. Science
+17. Social Issues
+18. Sports
+19. Technology
+20. Transport
+21. Travel`;
+
         const response = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
           contents: {
             parts: [
               { inlineData: { data: base64.split(',')[1], mimeType: file.type } },
-              { text: "Generate microstock metadata for this image. CRITICAL: Identify the exact style and medium (e.g., 2D vector, 3D render, photography, illustration) and include it in the title and keywords. Return a JSON object with 'title' (a descriptive title under 100 characters) and 'keywords' (a comma-separated string of exactly 47 relevant keywords). Do not include any other text." }
+              { text: `Generate microstock metadata for this image. CRITICAL: Identify the exact style and medium (e.g., 2D vector, 3D render, photography, illustration) and include it in the title and keywords. Also, classify the image into one of these categories (return ONLY the number): ${categoriesList}. Return a JSON object with 'title' (a descriptive title under 100 characters), 'keywords' (a comma-separated string of exactly 47 relevant keywords), and 'category' (the category number as a string). Do not include any other text.` }
             ]
           },
           config: {
@@ -681,9 +715,10 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
               type: Type.OBJECT,
               properties: {
                 title: { type: Type.STRING },
-                keywords: { type: Type.STRING }
+                keywords: { type: Type.STRING },
+                category: { type: Type.STRING }
               },
-              required: ["title", "keywords"]
+              required: ["title", "keywords", "category"]
             }
           }
         });
@@ -693,7 +728,8 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
           ...it, 
           status: 'completed', 
           title: (data.title || '').trim(), 
-          keywords: (data.keywords || '').trim() 
+          keywords: (data.keywords || '').trim(),
+          category: (data.category || '').trim()
         } : it));
       } catch (error) {
         console.error('Metadata error:', error);
@@ -715,17 +751,19 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
     const data = items.map(item => ({
       Filename: item.filename,
       Title: item.title,
-      Keywords: item.keywords
+      Keywords: item.keywords,
+      Category: item.category
     }));
     
     const csv = Papa.unparse(data, {
-      quotes: true, // Force quotes for all fields to avoid delimiter issues
+      quotes: true,
       delimiter: ","
     });
     
-    // Add BOM for Excel compatibility
+    // Add sep=, for Excel compatibility and BOM for UTF-8
+    const finalContent = `sep=,\r\n${csv}`;
     const BOM = "\uFEFF";
-    const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([BOM + finalContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
@@ -734,6 +772,7 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -746,7 +785,7 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="space-y-1">
           <h2 className="text-2xl font-bold tracking-tight">Microstock Metadata</h2>
-          <p className="text-gray-500 text-sm">Upload images to generate Titles and Keywords (46-48) for microstock submission.</p>
+          <p className="text-gray-500 text-sm">Upload images to generate Titles, Keywords, and Categories for microstock submission.</p>
         </div>
         <div className="flex gap-3">
           {items.length > 0 && (
@@ -797,6 +836,7 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
                   <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Filename</th>
                   <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Title</th>
                   <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Keywords (47)</th>
+                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider w-24">Category</th>
                   <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider w-24">Status</th>
                 </tr>
               </thead>
@@ -826,6 +866,13 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
                         </div>
                       ) : (
                         <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed">{item.keywords || '-'}</p>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {item.status === 'processing' ? (
+                        <div className="h-4 w-12 bg-gray-100 animate-pulse rounded" />
+                      ) : (
+                        <p className="text-sm font-medium text-gray-900">{item.category || '-'}</p>
                       )}
                     </td>
                     <td className="px-6 py-4">
@@ -879,10 +926,6 @@ function Settings({ apiKey, setApiKey }: { apiKey: string, setApiKey: (val: stri
                 <Key size={18} />
               </div>
             </div>
-            <p className="text-xs text-gray-400 leading-relaxed mt-2">
-              Your API key is stored locally in your browser's <code className="bg-gray-100 px-1 rounded">localStorage</code>. 
-              If you deploy to Vercel, you can also set the <code className="bg-gray-100 px-1 rounded">GEMINI_API_KEY</code> environment variable.
-            </p>
           </div>
 
           <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex gap-3 text-amber-800">
