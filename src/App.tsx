@@ -145,7 +145,7 @@ export default function App() {
       {/* Footer */}
       <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 border-t border-gray-200 mt-12">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-gray-400 text-sm">
-          <p>© 2026 Microstock AI Tools. Built with Gemini Flash (No extra API key needed).</p>
+          <p>© 2026 Microstock AI Tools. Powered by Gemini 3.1 Pro & Flash Image.</p>
           <div className="flex gap-6">
             <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="hover:text-black transition-colors flex items-center gap-1">
               Billing Info <ExternalLink size={12} />
@@ -221,13 +221,14 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
 
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash-image',
+          model: 'gemini-3.1-flash-image-preview',
           contents: {
             parts: [{ text: currentImage.prompt }],
           },
           config: {
             imageConfig: {
               aspectRatio: aspectRatio,
+              imageSize: "1K"
             },
           },
         });
@@ -480,7 +481,7 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
       });
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.1-pro-preview",
         contents: {
           parts: parts
         },
@@ -742,7 +743,7 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
 21. Travel`;
 
         const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
+          model: "gemini-3.1-pro-preview",
           contents: {
             parts: [
               { inlineData: { data: base64.split(',')[1], mimeType: file.type } },
