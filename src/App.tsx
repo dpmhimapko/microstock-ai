@@ -76,6 +76,11 @@ interface MetadataItem {
   category: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
   previewUrl: string;
+  isGenerativeAI: boolean;
+  policyAudit?: {
+    passed: boolean;
+    issues: string[];
+  };
 }
 
 interface UserProfile {
@@ -891,10 +896,11 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
   );
 }
 
-function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
+function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
   const [items, setItems] = useState<MetadataItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-3.1-pro-preview' | 'gemini-3.1-flash-lite-preview'>('gemini-3-flash-preview');
+  const [globalGenerativeAI, setGlobalGenerativeAI] = useState(true);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
@@ -905,18 +911,19 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
       keywords: '',
       category: '',
       status: 'pending',
-      previewUrl: URL.createObjectURL(file)
+      previewUrl: URL.createObjectURL(file),
+      isGenerativeAI: globalGenerativeAI
     }));
     setItems(prev => [...prev, ...newItems]);
-    processMetadata(newItems, acceptedFiles);
-  }, []);
+    processAdobeMetadata(newItems, acceptedFiles);
+  }, [globalGenerativeAI]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop, 
     accept: { 'image/*': [] }
   } as any);
 
-  const processMetadata = async (newItems: MetadataItem[], files: File[]) => {
+  const processAdobeMetadata = async (newItems: MetadataItem[], files: File[]) => {
     setIsProcessing(true);
     const apiKey = customApiKey || process.env.GEMINI_API_KEY;
     const ai = new GoogleGenAI({ apiKey });
@@ -925,35 +932,25 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
       setItems(prev => prev.map(it => it.id === item.id ? { ...it, status: 'processing' } : it));
       try {
         const base64 = await fileToBase64(file);
-        const categoriesList = `
-1. Animals
-2. Buildings and Architecture
-3. Business
-4. Drinks
-5. The Environment
-6. States of Mind
-7. Food
-8. Graphic Resources
-9. Hobbies and Leisure
-10. Industry
-11. Landscapes
-12. Lifestyle
-13. People
-14. Plants and Flowers
-15. Culture and Religion
-16. Science
-17. Social Issues
-18. Sports
-19. Technology
-20. Transport
-21. Travel`;
+        const adobeCategories = `1: Animals, 2: Buildings, 3: Business, 4: Drinks, 5: Environment, 6: States of Mind, 7: Food, 8: Graphic Resources, 9: Hobbies, 10: Industry, 11: Landscapes, 12: Lifestyle, 13: People, 14: Plants, 15: Culture, 16: Science, 17: Social Issues, 18: Sports, 19: Technology, 20: Transport, 21: Travel`;
 
         const response = await ai.models.generateContent({
           model: selectedModel,
           contents: {
             parts: [
               { inlineData: { data: base64.split(',')[1], mimeType: file.type } },
-              { text: `Generate microstock metadata for this image. CRITICAL: Identify the exact style and medium (e.g., 2D vector, 3D render, photography, illustration) and include it in the title and keywords. Also, classify the image into one of these categories (return ONLY the number): ${categoriesList}. Return a JSON object with 'title' (a descriptive title under 100 characters), 'keywords' (a comma-separated string of exactly 47 relevant keywords), and 'category' (the category number as a string). Do not include any other text.` }
+              { text: `You are an Adobe Stock Metadata Expert. Analyze this image and provide:
+              1. Title: Descriptive, no keywords, max 70 chars.
+              2. Keywords: Exactly 49 keywords. CRITICAL: The first 10 must be the most relevant for search ranking.
+              3. Category: Choose the best ID from: ${adobeCategories}.
+              4. Policy Audit: Check for visible trademarks, logos, or anatomical errors (AI artifacts).
+              
+              Return JSON: {
+                "title": "...",
+                "keywords": "...",
+                "category": "...",
+                "audit": { "passed": true/false, "issues": ["issue1", "issue2"] }
+              }` }
             ]
           },
           config: {
@@ -963,9 +960,16 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
               properties: {
                 title: { type: Type.STRING },
                 keywords: { type: Type.STRING },
-                category: { type: Type.STRING }
+                category: { type: Type.STRING },
+                audit: {
+                  type: Type.OBJECT,
+                  properties: {
+                    passed: { type: Type.BOOLEAN },
+                    issues: { type: Type.ARRAY, items: { type: Type.STRING } }
+                  }
+                }
               },
-              required: ["title", "keywords", "category"]
+              required: ["title", "keywords", "category", "audit"]
             }
           }
         });
@@ -976,7 +980,8 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
           status: 'completed', 
           title: data.title, 
           keywords: data.keywords,
-          category: data.category
+          category: data.category,
+          policyAudit: data.audit
         } : it));
       } catch (error) {
         setItems(prev => prev.map(it => it.id === item.id ? { ...it, status: 'error' } : it));
@@ -989,76 +994,154 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
     setIsProcessing(false);
   };
 
-  const downloadCSV = () => {
+  const downloadAdobeCSV = () => {
     const data = items.filter(it => it.status === 'completed').map(it => ({
-      Filename: it.filename,
-      Title: it.title,
-      Keywords: it.keywords,
-      Category: it.category
+      'Filename': it.filename,
+      'Title': it.title,
+      'Keywords': it.keywords,
+      'Category': it.category,
+      'Releases': '',
+      'Generative AI': it.isGenerativeAI ? 'Yes' : 'No'
     }));
     const csv = Papa.unparse(data);
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `metadata-${new Date().getTime()}.csv`;
+    link.download = `adobe-stock-upload-${new Date().getTime()}.csv`;
     link.click();
   };
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
-      <div className="flex flex-col md:flex-row gap-4 items-end">
-        <div className="flex-1 w-full">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Model</label>
-          <select 
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value as any)}
-            className="w-full p-3 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-black outline-none shadow-sm"
-          >
-            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Reasoning & Complex)</option>
-            <option value="gemini-3-flash-preview">Gemini 3 Flash (Balanced & Fast)</option>
-            <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite (Lite & Efficient)</option>
-          </select>
+      <div className="flex flex-col md:flex-row gap-6 items-start">
+        <div className="flex-1 w-full space-y-4">
+          <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm space-y-4">
+            <h3 className="font-bold text-gray-900 flex items-center gap-2">
+              <ShieldCheck size={18} /> Adobe Stock Settings
+            </h3>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Optimization Model</label>
+              <select 
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value as any)}
+                className="w-full p-3 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-black outline-none transition-all"
+              >
+                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Best for Audit)</option>
+                <option value="gemini-3-flash-preview">Gemini 3 Flash (Fast)</option>
+              </select>
+            </div>
+            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
+              <span className="text-sm font-medium">Generative AI Label</span>
+              <button 
+                onClick={() => setGlobalGenerativeAI(!globalGenerativeAI)}
+                className={cn(
+                  "w-12 h-6 rounded-full transition-all relative",
+                  globalGenerativeAI ? "bg-black" : "bg-gray-300"
+                )}
+              >
+                <div className={cn(
+                  "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                  globalGenerativeAI ? "left-7" : "left-1"
+                )} />
+              </button>
+            </div>
+          </div>
         </div>
+
         <div {...getRootProps()} className={cn(
-          "flex-[2] bg-white border-2 border-dashed rounded-3xl p-8 text-center transition-all cursor-pointer",
+          "flex-[2] bg-white border-2 border-dashed rounded-[2.5rem] p-12 text-center transition-all cursor-pointer group",
           isDragActive ? "border-black bg-gray-50" : "border-gray-200 hover:border-gray-400"
         )}>
           <input {...getInputProps()} />
-          <div className="flex items-center justify-center gap-4">
-            <FileSpreadsheet size={24} className="text-gray-400" />
-            <div className="text-left">
-              <h3 className="text-sm font-bold">Upload Images</h3>
-              <p className="text-xs text-gray-400">Drag & drop images here</p>
+          <div className="space-y-4">
+            <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto group-hover:scale-110 transition-transform">
+              <FileSpreadsheet size={32} className="text-gray-400" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold">Adobe Stock Hub</h3>
+              <p className="text-sm text-gray-400">Drop images here to generate Adobe-optimized metadata & audit policies.</p>
             </div>
           </div>
         </div>
       </div>
 
       {items.length > 0 && (
-        <div className="bg-white rounded-3xl border border-gray-200 overflow-hidden shadow-sm">
-          <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-            <h3 className="font-bold">Items ({items.length})</h3>
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <h3 className="font-bold text-gray-900">Batch Processing Queue ({items.length})</h3>
             <button 
-              onClick={downloadCSV}
+              onClick={downloadAdobeCSV}
               disabled={!items.some(it => it.status === 'completed')}
-              className="px-4 py-2 bg-black text-white rounded-xl text-sm font-bold disabled:bg-gray-200"
+              className="flex items-center gap-2 px-6 py-2.5 bg-black text-white rounded-2xl text-sm font-bold disabled:bg-gray-200 transition-all hover:shadow-lg active:scale-95"
             >
-              Download CSV
+              <Download size={16} /> Export Adobe CSV
             </button>
           </div>
-          <div className="divide-y divide-gray-100">
+          
+          <div className="grid grid-cols-1 gap-4">
             {items.map(item => (
-              <div key={item.id} className="p-4 flex items-center gap-4">
-                <img src={item.previewUrl} className="w-12 h-12 rounded-lg object-cover" alt="" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold truncate">{item.filename}</p>
-                  <p className="text-xs text-gray-400 truncate">{item.title || 'Processing...'}</p>
+              <motion.div 
+                layout
+                key={item.id} 
+                className="bg-white p-4 rounded-3xl border border-gray-200 flex flex-col md:flex-row gap-6 items-start md:items-center"
+              >
+                <div className="relative">
+                  <img src={item.previewUrl} className="w-24 h-24 rounded-2xl object-cover border border-gray-100" alt="" />
+                  {item.status === 'processing' && (
+                    <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] rounded-2xl flex items-center justify-center">
+                      <Loader2 className="animate-spin text-black" size={24} />
+                    </div>
+                  )}
                 </div>
-                <div className="text-xs font-bold uppercase tracking-widest">
-                  {item.status === 'processing' ? <Loader2 className="animate-spin" size={16} /> : item.status}
+
+                <div className="flex-1 min-w-0 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-bold truncate">{item.filename}</p>
+                    {item.policyAudit && (
+                      <span className={cn(
+                        "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border",
+                        item.policyAudit.passed ? "bg-green-50 text-green-600 border-green-100" : "bg-red-50 text-red-500 border-red-100"
+                      )}>
+                        {item.policyAudit.passed ? "Policy Passed" : "Policy Warning"}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 font-medium line-clamp-1">
+                    {item.title || (item.status === 'processing' ? 'Analyzing image...' : 'Pending...')}
+                  </p>
+                  {item.keywords && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {item.keywords.split(',').slice(0, 5).map((kw, i) => (
+                        <span key={i} className="px-2 py-0.5 bg-gray-50 text-gray-400 text-[10px] rounded-md border border-gray-100">
+                          {kw.trim()}
+                        </span>
+                      ))}
+                      <span className="text-[10px] text-gray-300">+{item.keywords.split(',').length - 5} more</span>
+                    </div>
+                  )}
                 </div>
-              </div>
+
+                {!item.policyAudit?.passed && item.policyAudit?.issues && (
+                  <div className="bg-red-50 p-3 rounded-2xl border border-red-100 max-w-xs w-full">
+                    <p className="text-[10px] font-bold text-red-600 uppercase mb-1 flex items-center gap-1">
+                      <AlertCircle size={10} /> Potential Issues:
+                    </p>
+                    <ul className="text-[10px] text-red-500 list-disc pl-3">
+                      {item.policyAudit.issues.map((issue, i) => <li key={i}>{issue}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setItems(prev => prev.filter(it => it.id !== item.id))}
+                    className="p-2 text-gray-300 hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              </motion.div>
             ))}
           </div>
         </div>
@@ -1094,7 +1177,7 @@ export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'batch' | 'promptGen' | 'metadata' | 'settings' | 'admin'>('batch');
+  const [activeTab, setActiveTab] = useState<'batch' | 'promptGen' | 'adobeHub' | 'settings' | 'admin'>('batch');
   const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('gemini_api_key') || '');
 
   useEffect(() => {
@@ -1199,10 +1282,10 @@ export default function App() {
                     label="Prompt Builder" 
                   />
                   <TabButton 
-                    active={activeTab === 'metadata'} 
-                    onClick={() => setActiveTab('metadata')} 
+                    active={activeTab === 'adobeHub'} 
+                    onClick={() => setActiveTab('adobeHub')} 
                     icon={FileSpreadsheet} 
-                    label="Metadata CSV" 
+                    label="Adobe Stock Hub" 
                   />
                   <TabButton 
                     active={activeTab === 'settings'} 
@@ -1230,8 +1313,8 @@ export default function App() {
                   <div className={cn(activeTab !== 'promptGen' && "hidden")}>
                     <PromptBuilder customApiKey={customApiKey} />
                   </div>
-                  <div className={cn(activeTab !== 'metadata' && "hidden")}>
-                    <MetadataGenerator customApiKey={customApiKey} />
+                  <div className={cn(activeTab !== 'adobeHub' && "hidden")}>
+                    <AdobeStockHub customApiKey={customApiKey} />
                   </div>
                   <div className={cn(activeTab !== 'settings' && "hidden")}>
                     <Settings apiKey={customApiKey} setApiKey={setCustomApiKey} />
