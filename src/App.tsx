@@ -366,6 +366,7 @@ const AdminDashboard = () => {
 function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
   const [promptsText, setPromptsText] = useState('');
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
+  const [selectedModel, setSelectedModel] = useState<'gemini-2.5-flash-image' | 'gemini-3.1-flash-image-preview'>('gemini-2.5-flash-image');
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
@@ -425,14 +426,14 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
 
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.1-flash-image-preview',
+          model: selectedModel,
           contents: {
             parts: [{ text: currentImage.prompt }],
           },
           config: {
             imageConfig: {
               aspectRatio: aspectRatio,
-              imageSize: "1K"
+              ...(selectedModel === 'gemini-3.1-flash-image-preview' && { imageSize: "1K" })
             },
           },
         });
@@ -479,6 +480,18 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
           <h2 className="text-lg font-semibold mb-4">Configuration</h2>
           
           <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Model</label>
+              <select 
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value as any)}
+                className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-black outline-none"
+              >
+                <option value="gemini-2.5-flash-image">Gemini 2.5 Flash Image (Standard)</option>
+                <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image (High Quality)</option>
+              </select>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Prompts (one per line)</label>
               <textarea
@@ -613,6 +626,7 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
   const [concept, setConcept] = useState('');
   const [brief, setBrief] = useState('');
   const [count, setCount] = useState<number | string>(5);
+  const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-3.1-pro-preview' | 'gemini-3.1-flash-lite-preview'>('gemini-3-flash-preview');
   const [isCustom, setIsCustom] = useState(false);
   const [results, setResults] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -685,7 +699,7 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
       });
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: selectedModel,
         contents: { parts: parts },
         config: {
           responseMimeType: "application/json",
@@ -726,6 +740,19 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
       <div className="bg-white p-8 rounded-3xl border border-gray-200 shadow-sm space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Model</label>
+              <select 
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value as any)}
+                className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-black outline-none"
+              >
+                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Reasoning & Complex)</option>
+                <option value="gemini-3-flash-preview">Gemini 3 Flash (Balanced & Fast)</option>
+                <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite (Lite & Efficient)</option>
+              </select>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Konsep Prompt</label>
               <textarea
@@ -867,6 +894,7 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
 function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
   const [items, setItems] = useState<MetadataItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-3.1-pro-preview' | 'gemini-3.1-flash-lite-preview'>('gemini-3-flash-preview');
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
@@ -921,7 +949,7 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
 21. Travel`;
 
         const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
+          model: selectedModel,
           contents: {
             parts: [
               { inlineData: { data: base64.split(',')[1], mimeType: file.type } },
@@ -979,14 +1007,32 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
-      <div {...getRootProps()} className={cn(
-        "bg-white border-2 border-dashed rounded-3xl p-12 text-center transition-all cursor-pointer",
-        isDragActive ? "border-black bg-gray-50" : "border-gray-200 hover:border-gray-400"
-      )}>
-        <input {...getInputProps()} />
-        <FileSpreadsheet size={48} className="mx-auto text-gray-400 mb-4" />
-        <h3 className="text-lg font-bold">Upload Images for Metadata</h3>
-        <p className="text-sm text-gray-400">Drag and drop images to generate titles, keywords, and categories.</p>
+      <div className="flex flex-col md:flex-row gap-4 items-end">
+        <div className="flex-1 w-full">
+          <label className="block text-sm font-medium text-gray-700 mb-2">Model</label>
+          <select 
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value as any)}
+            className="w-full p-3 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-black outline-none shadow-sm"
+          >
+            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Reasoning & Complex)</option>
+            <option value="gemini-3-flash-preview">Gemini 3 Flash (Balanced & Fast)</option>
+            <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite (Lite & Efficient)</option>
+          </select>
+        </div>
+        <div {...getRootProps()} className={cn(
+          "flex-[2] bg-white border-2 border-dashed rounded-3xl p-8 text-center transition-all cursor-pointer",
+          isDragActive ? "border-black bg-gray-50" : "border-gray-200 hover:border-gray-400"
+        )}>
+          <input {...getInputProps()} />
+          <div className="flex items-center justify-center gap-4">
+            <FileSpreadsheet size={24} className="text-gray-400" />
+            <div className="text-left">
+              <h3 className="text-sm font-bold">Upload Images</h3>
+              <p className="text-xs text-gray-400">Drag & drop images here</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {items.length > 0 && (
