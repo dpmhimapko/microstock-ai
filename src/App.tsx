@@ -763,6 +763,49 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
                     {num}
                   </button>
                 ))}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsCustom(true)}
+                    className={cn(
+                      "px-3 py-2 rounded-xl text-sm font-medium border transition-all",
+                      isCustom 
+                        ? "bg-black text-white border-black" 
+                        : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"
+                    )}
+                  >
+                    Custom
+                  </button>
+                  {isCustom && (
+                    <input
+                      type="number"
+                      value={count}
+                      onChange={(e) => setCount(e.target.value)}
+                      className="w-16 px-2 py-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-black outline-none"
+                      min="1"
+                      max="50"
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <label className="block text-sm font-medium text-gray-700 mb-3">Variasi yang Diinginkan</label>
+              <div className="flex flex-wrap gap-2">
+                {variationOptions.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => toggleVariation(opt.id)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-medium border transition-all",
+                      selectedVariations.includes(opt.id)
+                        ? "bg-gray-100 text-black border-black"
+                        : "bg-white text-gray-400 border-gray-100 hover:border-gray-200"
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
@@ -854,12 +897,35 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
       setItems(prev => prev.map(it => it.id === item.id ? { ...it, status: 'processing' } : it));
       try {
         const base64 = await fileToBase64(file);
+        const categoriesList = `
+1. Animals
+2. Buildings and Architecture
+3. Business
+4. Drinks
+5. The Environment
+6. States of Mind
+7. Food
+8. Graphic Resources
+9. Hobbies and Leisure
+10. Industry
+11. Landscapes
+12. Lifestyle
+13. People
+14. Plants and Flowers
+15. Culture and Religion
+16. Science
+17. Social Issues
+18. Sports
+19. Technology
+20. Transport
+21. Travel`;
+
         const response = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
           contents: {
             parts: [
               { inlineData: { data: base64.split(',')[1], mimeType: file.type } },
-              { text: `Generate microstock metadata for this image. Return a JSON object with 'title' (under 100 chars), 'keywords' (exactly 47 comma-separated keywords), and 'category' (a number 1-21).` }
+              { text: `Generate microstock metadata for this image. CRITICAL: Identify the exact style and medium (e.g., 2D vector, 3D render, photography, illustration) and include it in the title and keywords. Also, classify the image into one of these categories (return ONLY the number): ${categoriesList}. Return a JSON object with 'title' (a descriptive title under 100 characters), 'keywords' (a comma-separated string of exactly 47 relevant keywords), and 'category' (the category number as a string). Do not include any other text.` }
             ]
           },
           config: {
