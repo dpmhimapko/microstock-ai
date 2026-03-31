@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
 import { 
   Image as ImageIcon, 
   Type as TypeIcon, 
@@ -15,7 +15,18 @@ import {
   Key,
   Sparkles,
   Copy,
-  ClipboardCheck
+  ClipboardCheck,
+  LogIn,
+  LogOut,
+  ShieldCheck,
+  UserCheck,
+  UserX,
+  Users,
+  Clock,
+  LayoutDashboard,
+  Search,
+  Check,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useDropzone } from 'react-dropzone';
@@ -23,6 +34,26 @@ import Papa from 'papaparse';
 import JSZip from 'jszip';
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { cn } from './lib/utils';
+import { 
+  auth, 
+  db, 
+  googleProvider, 
+  signInWithPopup, 
+  signOut, 
+  onAuthStateChanged, 
+  doc, 
+  getDoc, 
+  setDoc, 
+  updateDoc, 
+  collection, 
+  query, 
+  where, 
+  onSnapshot, 
+  serverTimestamp,
+  FirebaseUser,
+  handleFirestoreError,
+  OperationType
+} from './firebase';
 
 // --- Types ---
 
@@ -47,6 +78,43 @@ interface MetadataItem {
   previewUrl: string;
 }
 
+interface UserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL: string;
+  role: 'admin' | 'user';
+  isApproved: boolean;
+  createdAt: any;
+}
+
+interface AuthContextType {
+  user: FirebaseUser | null;
+  profile: UserProfile | null;
+  loading: boolean;
+  isAdmin: boolean;
+}
+
+const AuthContext = createContext<AuthContextType>({
+  user: null,
+  profile: null,
+  loading: true,
+  isAdmin: false,
+});
+
+const useAuth = () => useContext(AuthContext);
+
+// --- Helpers ---
+
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = (error) => reject(error);
+  });
+};
+
 // --- Components ---
 
 const TabButton = ({ active, onClick, icon: Icon, label }: { active: boolean, onClick: () => void, icon: any, label: string }) => (
@@ -64,100 +132,236 @@ const TabButton = ({ active, onClick, icon: Icon, label }: { active: boolean, on
   </button>
 );
 
-export default function App() {
-  const [activeTab, setActiveTab] = useState<'batch' | 'metadata' | 'promptGen' | 'settings'>('batch');
-  const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('gemini_api_key') || '');
+const LoadingScreen = () => (
+  <div className="min-h-screen flex flex-col items-center justify-center bg-[#F5F5F5] text-black">
+    <motion.div
+      initial={{ scale: 0.8, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      className="flex flex-col items-center"
+    >
+      <Loader2 className="w-12 h-12 animate-spin text-black mb-4" />
+      <p className="text-sm font-medium tracking-widest uppercase opacity-50">Initializing...</p>
+    </motion.div>
+  </div>
+);
+
+const ErrorBoundary = ({ children }: { children: React.ReactNode }) => {
+  const [hasError, setHasError] = useState(false);
+  const [errorInfo, setErrorInfo] = useState<string | null>(null);
 
   useEffect(() => {
-    if (customApiKey) {
-      localStorage.setItem('gemini_api_key', customApiKey);
-    } else {
-      localStorage.removeItem('gemini_api_key');
+    const handleError = (event: ErrorEvent) => {
+      if (event.error?.message?.startsWith('{')) {
+        setHasError(true);
+        setErrorInfo(event.error.message);
+      }
+    };
+    window.addEventListener('error', handleError);
+    return () => window.removeEventListener('error', handleError);
+  }, []);
+
+  if (hasError) {
+    const info = errorInfo ? JSON.parse(errorInfo) : null;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-red-50 p-4">
+        <div className="max-w-md w-full bg-white p-8 rounded-3xl shadow-xl border border-red-100">
+          <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 mb-2">System Error</h2>
+          <p className="text-gray-600 mb-4">An error occurred while interacting with the database.</p>
+          {info && (
+            <div className="bg-gray-50 p-4 rounded-xl text-xs font-mono overflow-auto max-h-48">
+              <pre>{JSON.stringify(info, null, 2)}</pre>
+            </div>
+          )}
+          <button 
+            onClick={() => window.location.reload()}
+            className="mt-6 w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors"
+          >
+            Reload Application
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+};
+
+const Login = () => {
+  const handleLogin = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+      console.error('Login error:', error);
     }
-  }, [customApiKey]);
+  };
 
   return (
-    <div className="min-h-screen bg-[#F5F5F5] text-black font-sans selection:bg-black selection:text-white">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center text-white">
-                <ImageIcon size={20} />
-              </div>
-              <h1 className="text-xl font-semibold tracking-tight">Microstock AI</h1>
-            </div>
-            {customApiKey && (
-              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-green-50 text-green-700 rounded-full text-xs font-bold border border-green-100">
-                <Key size={12} /> Custom API Key Active
-              </div>
-            )}
-          </div>
-          
-          <div className="overflow-x-auto scrollbar-hide">
-            <nav className="flex -mb-px min-w-max">
-              <TabButton 
-                active={activeTab === 'batch'} 
-                onClick={() => setActiveTab('batch')} 
-                icon={ImageIcon} 
-                label="Batch Image Gen" 
-              />
-              <TabButton 
-                active={activeTab === 'promptGen'} 
-                onClick={() => setActiveTab('promptGen')} 
-                icon={Sparkles} 
-                label="Prompt Builder" 
-              />
-              <TabButton 
-                active={activeTab === 'metadata'} 
-                onClick={() => setActiveTab('metadata')} 
-                icon={FileSpreadsheet} 
-                label="Metadata CSV" 
-              />
-              <TabButton 
-                active={activeTab === 'settings'} 
-                onClick={() => setActiveTab('settings')} 
-                icon={Key} 
-                label="API Settings" 
-              />
-            </nav>
-          </div>
+    <div className="min-h-screen flex items-center justify-center bg-[#F5F5F5] p-4">
+      <motion.div 
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className="max-w-sm w-full bg-white p-10 rounded-[2.5rem] shadow-sm border border-gray-200 text-center"
+      >
+        <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
+          <ShieldCheck className="w-8 h-8 text-black" />
         </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className={cn(activeTab !== 'batch' && "hidden")}>
-          <BatchImageGen customApiKey={customApiKey} />
-        </div>
-        <div className={cn(activeTab !== 'promptGen' && "hidden")}>
-          <PromptBuilder customApiKey={customApiKey} />
-        </div>
-        <div className={cn(activeTab !== 'metadata' && "hidden")}>
-          <MetadataGenerator customApiKey={customApiKey} />
-        </div>
-        <div className={cn(activeTab !== 'settings' && "hidden")}>
-          <Settings apiKey={customApiKey} setApiKey={setCustomApiKey} />
-        </div>
-      </main>
-
-      {/* Footer */}
-      <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 border-t border-gray-200 mt-12">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-gray-400 text-sm">
-          <p>© 2026 Microstock AI Tools. Powered by Gemini 3.1 Pro & Flash.</p>
-          <div className="flex gap-6">
-            <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="hover:text-black transition-colors flex items-center gap-1">
-              Billing Info <ExternalLink size={12} />
-            </a>
-          </div>
-        </div>
-      </footer>
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">Secure Access</h1>
+        <p className="text-gray-500 mb-8 text-sm leading-relaxed">
+          Please sign in with your Google account to request access to the portal.
+        </p>
+        <button
+          onClick={handleLogin}
+          className="w-full flex items-center justify-center gap-3 py-4 bg-white border-2 border-gray-100 text-gray-700 rounded-2xl font-bold hover:border-black hover:bg-gray-50 transition-all active:scale-95"
+        >
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+          Sign in with Google
+        </button>
+      </motion.div>
     </div>
   );
-}
+};
 
-// --- Feature Components ---
+const PendingApproval = () => {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[#F5F5F5] p-4">
+      <motion.div 
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="max-w-md w-full bg-white p-10 rounded-[2.5rem] shadow-sm border border-gray-200 text-center"
+      >
+        <div className="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
+          <Clock className="w-8 h-8 text-amber-600" />
+        </div>
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">Awaiting Approval</h1>
+        <p className="text-gray-500 mb-8 text-sm leading-relaxed">
+          Your account has been created successfully. An administrator needs to approve your access before you can enter the portal.
+        </p>
+        <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100 mb-8">
+          <p className="text-xs font-medium text-amber-800">
+            Contact <strong>aahdan298@gmail.com</strong> for faster approval.
+          </p>
+        </div>
+        <button
+          onClick={() => signOut(auth)}
+          className="text-sm font-bold text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          Sign Out
+        </button>
+      </motion.div>
+    </div>
+  );
+};
+
+const AdminDashboard = () => {
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    const q = query(collection(db, 'users'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const usersData = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile));
+      setUsers(usersData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'users');
+    });
+    return unsubscribe;
+  }, []);
+
+  const toggleApproval = async (userId: string, currentStatus: boolean) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        isApproved: !currentStatus
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+    }
+  };
+
+  const filteredUsers = users.filter(u => 
+    u.email?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    u.displayName?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-8">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900 tracking-tight">User Management</h2>
+          <p className="text-gray-500 text-sm">Approve or revoke access for registered users.</p>
+        </div>
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input 
+            type="text" 
+            placeholder="Search users..." 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-11 pr-4 py-3 bg-white border border-gray-200 rounded-2xl w-full md:w-64 focus:ring-2 focus:ring-black focus:border-transparent outline-none transition-all shadow-sm"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4">
+        <AnimatePresence mode="popLayout">
+          {filteredUsers.map((u) => (
+            <motion.div
+              layout
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              key={u.uid}
+              className="bg-white p-5 rounded-3xl border border-gray-200 shadow-sm flex items-center justify-between group hover:shadow-md transition-all"
+            >
+              <div className="flex items-center gap-4">
+                <img src={u.photoURL} className="w-12 h-12 rounded-2xl object-cover border-2 border-gray-50" alt="" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-gray-900">{u.displayName}</h3>
+                    {u.role === 'admin' && (
+                      <span className="px-2 py-0.5 bg-gray-100 text-black text-[10px] font-bold uppercase tracking-wider rounded-full border border-gray-200">
+                        Admin
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 font-medium">{u.email}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  "px-4 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider border flex items-center gap-1.5",
+                  u.isApproved 
+                    ? "bg-green-50 text-green-600 border-green-100" 
+                    : "bg-amber-50 text-amber-600 border-amber-100"
+                )}>
+                  {u.isApproved ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                  {u.isApproved ? 'Approved' : 'Pending'}
+                </div>
+                
+                {u.role !== 'admin' && (
+                  <button
+                    onClick={() => toggleApproval(u.uid, u.isApproved)}
+                    className={cn(
+                      "w-10 h-10 rounded-2xl flex items-center justify-center transition-all active:scale-90",
+                      u.isApproved 
+                        ? "bg-red-50 text-red-500 hover:bg-red-100" 
+                        : "bg-black text-white hover:bg-gray-800"
+                    )}
+                  >
+                    {u.isApproved ? <X className="w-5 h-5" /> : <Check className="w-5 h-5" />}
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+};
+
+// --- Feature Components (Original) ---
 
 function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
   const [promptsText, setPromptsText] = useState('');
@@ -212,7 +416,7 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
 
     const apiKey = customApiKey || process.env.GEMINI_API_KEY;
     const ai = new GoogleGenAI({ apiKey });
-    const concurrencyLimit = 2; // Process 2 images at a time
+    const concurrencyLimit = 2;
 
     const processImage = async (currentImage: GeneratedImage) => {
       setImages(prev => prev.map(img => 
@@ -256,7 +460,6 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
       }
     };
 
-    // Batch processing
     for (let i = 0; i < newImages.length; i += concurrencyLimit) {
       const batch = newImages.slice(i, i + concurrencyLimit);
       await Promise.all(batch.map(processImage));
@@ -269,7 +472,6 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
     <motion.div 
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
       className="grid grid-cols-1 lg:grid-cols-3 gap-8"
     >
       <div className="lg:col-span-1 space-y-6">
@@ -476,17 +678,15 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
         ${brief ? `ADDITIONAL BRIEF/INSTRUCTIONS: "${brief}". You MUST strictly follow these instructions in every generated prompt.` : ""}
         
         CRITICAL RULES:
-        1. SUBJECT CONSISTENCY: You MUST maintain the EXACT SAME SUBJECT as seen in the reference image or described in the concept. If it's a "businessman", every prompt MUST be about a "businessman". Do NOT change the subject to a doctor, artist, or anything else.
-        2. STYLE CONSISTENCY: ${file ? `You MUST strictly follow the visual style, medium (e.g., 2D vector, 3D render, photography), artistic technique, and background characteristics of the reference image.` : "Maintain a consistent artistic style across all prompts."}
+        1. SUBJECT CONSISTENCY: You MUST maintain the EXACT SAME SUBJECT as seen in the reference image or described in the concept.
+        2. STYLE CONSISTENCY: Maintain a consistent artistic style across all prompts.
         3. VARIATIONS: Create diversity by varying ONLY the following aspects: ${variationsText || "general composition"}.
         4. FORMAT: Return ONLY a JSON array of strings, no other text.`
       });
 
       const response = await ai.models.generateContent({
         model: "gemini-3.1-pro-preview",
-        contents: {
-          parts: parts
-        },
+        contents: { parts: parts },
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -516,7 +716,6 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
     <motion.div 
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
       className="max-w-4xl mx-auto space-y-8"
     >
       <div className="text-center space-y-2">
@@ -542,7 +741,7 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
               <textarea
                 value={brief}
                 onChange={(e) => setBrief(e.target.value)}
-                placeholder="Contoh: Tambahkan gaya neon, buat suasana gelap, atau instruksi khusus lainnya..."
+                placeholder="Contoh: Tambahkan gaya neon..."
                 className="w-full h-24 p-4 text-sm border border-gray-200 rounded-2xl focus:ring-2 focus:ring-black focus:border-transparent outline-none transition-all resize-none"
               />
             </div>
@@ -564,49 +763,6 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
                     {num}
                   </button>
                 ))}
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setIsCustom(true)}
-                    className={cn(
-                      "px-3 py-2 rounded-xl text-sm font-medium border transition-all",
-                      isCustom 
-                        ? "bg-black text-white border-black" 
-                        : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"
-                    )}
-                  >
-                    Custom
-                  </button>
-                  {isCustom && (
-                    <input
-                      type="number"
-                      value={count}
-                      onChange={(e) => setCount(e.target.value)}
-                      className="w-16 px-2 py-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-black outline-none"
-                      min="1"
-                      max="50"
-                    />
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <label className="block text-sm font-medium text-gray-700 mb-3">Variasi yang Diinginkan</label>
-              <div className="flex flex-wrap gap-2">
-                {variationOptions.map((opt) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => toggleVariation(opt.id)}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-medium border transition-all",
-                      selectedVariations.includes(opt.id)
-                        ? "bg-gray-100 text-black border-black"
-                        : "bg-white text-gray-400 border-gray-100 hover:border-gray-200"
-                    )}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
               </div>
             </div>
           </div>
@@ -623,29 +779,14 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
             >
               <input {...getInputProps()} />
               {preview ? (
-                <>
-                  <img src={preview} alt="Reference" className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <p className="text-white text-xs font-medium">Ganti Gambar</p>
-                  </div>
-                </>
+                <img src={preview} alt="Reference" className="w-full h-full object-cover" />
               ) : (
                 <div className="space-y-2">
-                  <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center mx-auto text-gray-400">
-                    <Plus size={20} />
-                  </div>
+                  <Plus size={20} className="mx-auto text-gray-400" />
                   <p className="text-xs text-gray-400">Klik atau seret gambar referensi</p>
                 </div>
               )}
             </div>
-            {preview && (
-              <button 
-                onClick={(e) => { e.stopPropagation(); setFile(null); setPreview(''); }}
-                className="text-xs text-red-500 hover:underline w-full text-center"
-              >
-                Hapus Referensi
-              </button>
-            )}
           </div>
         </div>
 
@@ -660,31 +801,17 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
       </div>
 
       {results.length > 0 && (
-        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="font-bold text-gray-900">Generated Variations ({results.length})</h3>
-            <button 
-              onClick={copyAll}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all",
-                copiedAll ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              )}
-            >
-              {copiedAll ? <ClipboardCheck size={16} /> : <Copy size={16} />}
-              {copiedAll ? "Copied All!" : "Copy All for Batch Gen"}
+            <button onClick={copyAll} className="text-sm font-medium text-gray-500 hover:text-black transition-colors">
+              {copiedAll ? "Copied!" : "Copy All"}
             </button>
           </div>
           <div className="space-y-3">
             {results.map((res, idx) => (
-              <div key={idx} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm relative group">
-                <p className="text-sm text-gray-700 leading-relaxed pr-10 italic">"{res}"</p>
-                <button 
-                  onClick={() => navigator.clipboard.writeText(res)}
-                  className="absolute top-4 right-4 p-2 bg-gray-50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-gray-100"
-                  title="Copy single prompt"
-                >
-                  <Copy size={14} className="text-gray-400" />
-                </button>
+              <div key={idx} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                <p className="text-sm text-gray-700 leading-relaxed italic">"{res}"</p>
               </div>
             ))}
           </div>
@@ -710,8 +837,6 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
       previewUrl: URL.createObjectURL(file)
     }));
     setItems(prev => [...prev, ...newItems]);
-    
-    // Start processing automatically
     processMetadata(newItems, acceptedFiles);
   }, []);
 
@@ -724,42 +849,17 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
     setIsProcessing(true);
     const apiKey = customApiKey || process.env.GEMINI_API_KEY;
     const ai = new GoogleGenAI({ apiKey });
-    const concurrencyLimit = 4; // Process 4 images at a time
 
     const processItem = async (item: MetadataItem, file: File) => {
       setItems(prev => prev.map(it => it.id === item.id ? { ...it, status: 'processing' } : it));
-
       try {
         const base64 = await fileToBase64(file);
-        const categoriesList = `
-1. Animals
-2. Buildings and Architecture
-3. Business
-4. Drinks
-5. The Environment
-6. States of Mind
-7. Food
-8. Graphic Resources
-9. Hobbies and Leisure
-10. Industry
-11. Landscapes
-12. Lifestyle
-13. People
-14. Plants and Flowers
-15. Culture and Religion
-16. Science
-17. Social Issues
-18. Sports
-19. Technology
-20. Transport
-21. Travel`;
-
         const response = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
           contents: {
             parts: [
               { inlineData: { data: base64.split(',')[1], mimeType: file.type } },
-              { text: `Generate microstock metadata for this image. CRITICAL: Identify the exact style and medium (e.g., 2D vector, 3D render, photography, illustration) and include it in the title and keywords. Also, classify the image into one of these categories (return ONLY the number): ${categoriesList}. Return a JSON object with 'title' (a descriptive title under 100 characters), 'keywords' (a comma-separated string of exactly 47 relevant keywords), and 'category' (the category number as a string). Do not include any other text.` }
+              { text: `Generate microstock metadata for this image. Return a JSON object with 'title' (under 100 chars), 'keywords' (exactly 47 comma-separated keywords), and 'category' (a number 1-21).` }
             ]
           },
           config: {
@@ -780,164 +880,74 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
         setItems(prev => prev.map(it => it.id === item.id ? { 
           ...it, 
           status: 'completed', 
-          title: (data.title || '').trim(), 
-          keywords: (data.keywords || '').trim(),
-          category: (data.category || '').trim()
+          title: data.title, 
+          keywords: data.keywords,
+          category: data.category
         } : it));
       } catch (error) {
-        console.error('Metadata error:', error);
         setItems(prev => prev.map(it => it.id === item.id ? { ...it, status: 'error' } : it));
       }
     };
 
-    // Batch processing
-    for (let i = 0; i < newItems.length; i += concurrencyLimit) {
-      const batchItems = newItems.slice(i, i + concurrencyLimit);
-      const batchFiles = files.slice(i, i + concurrencyLimit);
-      await Promise.all(batchItems.map((item, idx) => processItem(item, batchFiles[idx])));
+    for (let i = 0; i < newItems.length; i++) {
+      await processItem(newItems[i], files[i]);
     }
-
     setIsProcessing(false);
   };
 
-  const exportCSV = () => {
-    const data = items.map(item => ({
-      Filename: item.filename,
-      Title: item.title,
-      Keywords: item.keywords,
-      Category: item.category
+  const downloadCSV = () => {
+    const data = items.filter(it => it.status === 'completed').map(it => ({
+      Filename: it.filename,
+      Title: it.title,
+      Keywords: it.keywords,
+      Category: it.category
     }));
-    
-    const csv = Papa.unparse(data, {
-      quotes: true,
-      delimiter: ","
-    });
-    
-    // Add sep=, for Excel compatibility and BOM for UTF-8
-    const finalContent = `sep=,\r\n${csv}`;
-    const BOM = "\uFEFF";
-    const blob = new Blob([BOM + finalContent], { type: 'text/csv;charset=utf-8;' });
+    const csv = Papa.unparse(data);
+    const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `metadata_export_${new Date().getTime()}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
+    link.href = url;
+    link.download = `metadata-${new Date().getTime()}.csv`;
     link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
-      className="space-y-8"
-    >
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div className="space-y-1">
-          <h2 className="text-2xl font-bold tracking-tight">Microstock Metadata</h2>
-          <p className="text-gray-500 text-sm">Upload images to generate Titles, Keywords, and Categories for microstock submission.</p>
-        </div>
-        <div className="flex gap-3">
-          {items.length > 0 && (
-            <button 
-              onClick={() => setItems([])}
-              className="px-4 py-2 text-sm font-medium text-gray-500 hover:text-red-500 transition-colors"
-            >
-              Clear All
-            </button>
-          )}
-          <button
-            onClick={exportCSV}
-            disabled={items.length === 0 || isProcessing}
-            className="px-6 py-2 bg-black text-white rounded-xl font-medium hover:bg-gray-800 disabled:bg-gray-200 disabled:text-gray-400 transition-all flex items-center gap-2"
-          >
-            <Download size={18} />
-            Export CSV
-          </button>
-        </div>
-      </div>
-
-      <div 
-        {...getRootProps()} 
-        className={cn(
-          "bg-white border-2 border-dashed rounded-3xl p-12 text-center transition-all cursor-pointer",
-          isDragActive ? "border-black bg-gray-50" : "border-gray-200 hover:border-gray-400"
-        )}
-      >
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+      <div {...getRootProps()} className={cn(
+        "bg-white border-2 border-dashed rounded-3xl p-12 text-center transition-all cursor-pointer",
+        isDragActive ? "border-black bg-gray-50" : "border-gray-200 hover:border-gray-400"
+      )}>
         <input {...getInputProps()} />
-        <div className="space-y-4">
-          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto text-gray-400">
-            <Plus size={32} />
-          </div>
-          <div>
-            <p className="font-medium text-lg">Drop images here to start processing</p>
-            <p className="text-sm text-gray-400">Supports batch upload of multiple images</p>
-          </div>
-        </div>
+        <FileSpreadsheet size={48} className="mx-auto text-gray-400 mb-4" />
+        <h3 className="text-lg font-bold">Upload Images for Metadata</h3>
+        <p className="text-sm text-gray-400">Drag and drop images to generate titles, keywords, and categories.</p>
       </div>
 
       {items.length > 0 && (
         <div className="bg-white rounded-3xl border border-gray-200 overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider w-24">Preview</th>
-                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Filename</th>
-                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Title</th>
-                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Keywords (47)</th>
-                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider w-24">Category</th>
-                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider w-24">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {items.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50 transition-colors group">
-                    <td className="px-6 py-4">
-                      <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
-                        <img src={item.previewUrl} alt="Preview" className="w-full h-full object-cover" />
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="text-sm font-medium text-gray-900 truncate max-w-[150px]">{item.filename}</p>
-                    </td>
-                    <td className="px-6 py-4">
-                      {item.status === 'processing' ? (
-                        <div className="h-4 w-32 bg-gray-100 animate-pulse rounded" />
-                      ) : (
-                        <p className="text-sm text-gray-600 line-clamp-2">{item.title || '-'}</p>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      {item.status === 'processing' ? (
-                        <div className="space-y-2">
-                          <div className="h-3 w-full bg-gray-100 animate-pulse rounded" />
-                          <div className="h-3 w-2/3 bg-gray-100 animate-pulse rounded" />
-                        </div>
-                      ) : (
-                        <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed">{item.keywords || '-'}</p>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      {item.status === 'processing' ? (
-                        <div className="h-4 w-12 bg-gray-100 animate-pulse rounded" />
-                      ) : (
-                        <p className="text-sm font-medium text-gray-900">{item.category || '-'}</p>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      {item.status === 'processing' && <Loader2 className="animate-spin text-gray-400" size={18} />}
-                      {item.status === 'completed' && <CheckCircle2 className="text-green-500" size={18} />}
-                      {item.status === 'error' && <AlertCircle className="text-red-500" size={18} />}
-                      {item.status === 'pending' && <div className="w-2 h-2 rounded-full bg-gray-200" />}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+            <h3 className="font-bold">Items ({items.length})</h3>
+            <button 
+              onClick={downloadCSV}
+              disabled={!items.some(it => it.status === 'completed')}
+              className="px-4 py-2 bg-black text-white rounded-xl text-sm font-bold disabled:bg-gray-200"
+            >
+              Download CSV
+            </button>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {items.map(item => (
+              <div key={item.id} className="p-4 flex items-center gap-4">
+                <img src={item.previewUrl} className="w-12 h-12 rounded-lg object-cover" alt="" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold truncate">{item.filename}</p>
+                  <p className="text-xs text-gray-400 truncate">{item.title || 'Processing...'}</p>
+                </div>
+                <div className="text-xs font-bold uppercase tracking-widest">
+                  {item.status === 'processing' ? <Loader2 className="animate-spin" size={16} /> : item.status}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -947,72 +957,191 @@ function MetadataGenerator({ customApiKey }: { customApiKey?: string }) {
 
 function Settings({ apiKey, setApiKey }: { apiKey: string, setApiKey: (val: string) => void }) {
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
-      className="max-w-2xl mx-auto space-y-8"
-    >
-      <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center text-white">
-            <Key size={20} />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold tracking-tight">API Configuration</h2>
-            <p className="text-gray-400 text-sm">Set up your Gemini API key for deployment</p>
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <div className="space-y-2">
-            <label className="text-sm font-bold text-gray-700">Gemini API Key</label>
-            <div className="relative">
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Enter your API key here..."
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-black focus:border-transparent outline-none transition-all pr-12"
-              />
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400">
-                <Key size={18} />
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex gap-3 text-amber-800">
-            <AlertCircle size={20} className="shrink-0 mt-0.5" />
-            <div className="text-sm">
-              <p className="font-bold mb-1">Security Warning</p>
-              <p className="opacity-80">Never share your API key with anyone. If you are using this on a public computer, make sure to clear your browser data after use.</p>
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-4">
-            <button 
-              onClick={() => {
-                localStorage.removeItem('gemini_api_key');
-                setApiKey('');
-              }}
-              className="text-sm text-red-500 hover:underline font-medium"
-            >
-              Reset to Default
-            </button>
-          </div>
-        </div>
+    <div className="max-w-md mx-auto bg-white p-8 rounded-3xl border border-gray-200 shadow-sm">
+      <h2 className="text-xl font-bold mb-4">API Settings</h2>
+      <p className="text-sm text-gray-500 mb-6">Enter your custom Gemini API key to bypass default limits.</p>
+      <div className="space-y-4">
+        <input 
+          type="password" 
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          placeholder="Enter Gemini API Key"
+          className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black outline-none"
+        />
+        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline block">
+          Get your API key here
+        </a>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
-// --- Utils ---
+// --- Main App ---
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = error => reject(error);
-  });
+export default function App() {
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'batch' | 'promptGen' | 'metadata' | 'settings' | 'admin'>('batch');
+  const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('gemini_api_key') || '');
+
+  useEffect(() => {
+    if (customApiKey) {
+      localStorage.setItem('gemini_api_key', customApiKey);
+    } else {
+      localStorage.removeItem('gemini_api_key');
+    }
+  }, [customApiKey]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setUser(firebaseUser);
+      if (firebaseUser) {
+        const userDocRef = doc(db, 'users', firebaseUser.uid);
+        const unsubProfile = onSnapshot(userDocRef, async (docSnap) => {
+          if (docSnap.exists()) {
+            setProfile({ uid: docSnap.id, ...docSnap.data() } as UserProfile);
+            setLoading(false);
+          } else {
+            const isAdmin = firebaseUser.email === 'aahdan298@gmail.com';
+            const newProfile = {
+              email: firebaseUser.email,
+              displayName: firebaseUser.displayName,
+              photoURL: firebaseUser.photoURL,
+              role: isAdmin ? 'admin' : 'user',
+              isApproved: isAdmin,
+              createdAt: serverTimestamp()
+            };
+            try {
+              await setDoc(userDocRef, newProfile);
+            } catch (error) {
+              handleFirestoreError(error, OperationType.CREATE, `users/${firebaseUser.uid}`);
+            }
+          }
+        });
+        return () => unsubProfile();
+      } else {
+        setProfile(null);
+        setLoading(false);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Login />;
+  if (profile && !profile.isApproved) return <PendingApproval />;
+
+  const isAdmin = profile?.role === 'admin';
+
+  return (
+    <ErrorBoundary>
+      <AuthContext.Provider value={{ user, profile, loading, isAdmin }}>
+        <div className="min-h-screen bg-[#F5F5F5] text-black font-sans selection:bg-black selection:text-white">
+          {/* Header */}
+          <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex justify-between items-center h-16">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center text-white">
+                    <ShieldCheck size={20} />
+                  </div>
+                  <h1 className="text-xl font-semibold tracking-tight">Microstock AI</h1>
+                </div>
+                
+                <div className="flex items-center gap-4">
+                  {isAdmin && (
+                    <button 
+                      onClick={() => setActiveTab('admin')}
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2",
+                        activeTab === 'admin' ? "bg-black text-white" : "text-gray-400 hover:text-gray-600"
+                      )}
+                    >
+                      <Users size={14} />
+                      Admin
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => signOut(auth)}
+                    className="text-gray-400 hover:text-red-500 transition-colors"
+                    title="Sign Out"
+                  >
+                    <LogOut size={18} />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="overflow-x-auto scrollbar-hide">
+                <nav className="flex -mb-px min-w-max">
+                  <TabButton 
+                    active={activeTab === 'batch'} 
+                    onClick={() => setActiveTab('batch')} 
+                    icon={ImageIcon} 
+                    label="Batch Image Gen" 
+                  />
+                  <TabButton 
+                    active={activeTab === 'promptGen'} 
+                    onClick={() => setActiveTab('promptGen')} 
+                    icon={Sparkles} 
+                    label="Prompt Builder" 
+                  />
+                  <TabButton 
+                    active={activeTab === 'metadata'} 
+                    onClick={() => setActiveTab('metadata')} 
+                    icon={FileSpreadsheet} 
+                    label="Metadata CSV" 
+                  />
+                  <TabButton 
+                    active={activeTab === 'settings'} 
+                    onClick={() => setActiveTab('settings')} 
+                    icon={Key} 
+                    label="API Settings" 
+                  />
+                </nav>
+              </div>
+            </div>
+          </header>
+
+          {/* Main Content */}
+          <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <AnimatePresence mode="wait">
+              {activeTab === 'admin' ? (
+                <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                  <AdminDashboard />
+                </motion.div>
+              ) : (
+                <div className="space-y-8">
+                  <div className={cn(activeTab !== 'batch' && "hidden")}>
+                    <BatchImageGen customApiKey={customApiKey} />
+                  </div>
+                  <div className={cn(activeTab !== 'promptGen' && "hidden")}>
+                    <PromptBuilder customApiKey={customApiKey} />
+                  </div>
+                  <div className={cn(activeTab !== 'metadata' && "hidden")}>
+                    <MetadataGenerator customApiKey={customApiKey} />
+                  </div>
+                  <div className={cn(activeTab !== 'settings' && "hidden")}>
+                    <Settings apiKey={customApiKey} setApiKey={setCustomApiKey} />
+                  </div>
+                </div>
+              )}
+            </AnimatePresence>
+          </main>
+
+          {/* Footer */}
+          <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 border-t border-gray-200 mt-12">
+            <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-gray-400 text-sm">
+              <p>© 2026 Microstock AI Tools. Secure Access Enabled.</p>
+              <div className="flex gap-6">
+                <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="hover:text-black transition-colors flex items-center gap-1">
+                  Billing Info <ExternalLink size={12} />
+                </a>
+              </div>
+            </div>
+          </footer>
+        </div>
+      </AuthContext.Provider>
+    </ErrorBoundary>
+  );
 }

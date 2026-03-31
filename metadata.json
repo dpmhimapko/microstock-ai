@@ -1,5 +1,5 @@
 {
-  "name": "Microstock AI Tools",
-  "description": "Batch image generation, image-to-prompt analysis, and microstock metadata generator with CSV export.",
+  "name": "Secure Access Portal",
+  "description": "A secure application with Google Login and an admin-controlled approval system.",
   "requestFramePermissions": []
 }

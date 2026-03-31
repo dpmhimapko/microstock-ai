@@ -1,0 +1,64 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - email: string (required)
+    //   - displayName: string (optional)
+    //   - photoURL: string (optional)
+    //   - role: string (required, 'admin' or 'user')
+    //   - isApproved: bool (required)
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "aahdan298@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role', 'isApproved', 'createdAt']) &&
+             data.email is string && data.email.size() > 0 &&
+             data.role in ['admin', 'user'] &&
+             data.isApproved is bool &&
+             data.createdAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && (
+        // Bootstrap admin can create themselves as admin and approved
+        (request.auth.token.email == "aahdan298@gmail.com" && request.auth.token.email_verified == true && request.resource.data.role == 'admin' && request.resource.data.isApproved == true) ||
+        // Others must be 'user' and not approved
+        (request.resource.data.role == 'user' && request.resource.data.isApproved == false)
+      );
+
+      allow update: if isAdmin() || (
+        isOwner(userId) && 
+        isValidUser(request.resource.data) &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.isApproved == resource.data.isApproved
+      );
+
+      allow delete: if isAdmin();
+    }
+  }
+}
