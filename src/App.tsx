@@ -1241,7 +1241,10 @@ export default function App() {
                   <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center text-white">
                     <ShieldCheck size={20} />
                   </div>
-                  <h1 className="text-xl font-semibold tracking-tight">Microstock AI</h1>
+                  <div className="flex flex-col">
+                    <h1 className="text-xl font-semibold tracking-tight leading-none">Microstock AI</h1>
+                    <span className="text-[9px] font-bold text-gray-400 mt-1 tracking-[0.2em]">BY AHDAN</span>
+                  </div>
                 </div>
                 
                 <div className="flex items-center gap-4">
