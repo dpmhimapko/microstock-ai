@@ -901,6 +901,7 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-3.1-pro-preview' | 'gemini-3.1-flash-lite-preview'>('gemini-3-flash-preview');
   const [globalGenerativeAI, setGlobalGenerativeAI] = useState(true);
+  const [vectorMode, setVectorMode] = useState(false);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
@@ -995,14 +996,23 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
   };
 
   const downloadAdobeCSV = () => {
-    const data = items.filter(it => it.status === 'completed').map(it => ({
-      'Filename': it.filename,
-      'Title': it.title,
-      'Keywords': it.keywords,
-      'Category': it.category,
-      'Releases': '',
-      'Generative AI': it.isGenerativeAI ? 'Yes' : 'No'
-    }));
+    const data = items.filter(it => it.status === 'completed').map(it => {
+      let finalFilename = it.filename;
+      if (vectorMode) {
+        const lastDotIndex = it.filename.lastIndexOf('.');
+        const nameWithoutExt = lastDotIndex !== -1 ? it.filename.substring(0, lastDotIndex) : it.filename;
+        finalFilename = `${nameWithoutExt}_vector.ai`;
+      }
+
+      return {
+        'Filename': finalFilename,
+        'Title': it.title,
+        'Keywords': it.keywords,
+        'Category': it.category,
+        'Releases': '',
+        'Generative AI': it.isGenerativeAI ? 'Yes' : 'No'
+      };
+    });
     const csv = Papa.unparse(data);
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -1043,6 +1053,24 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
                 <div className={cn(
                   "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
                   globalGenerativeAI ? "left-7" : "left-1"
+                )} />
+              </button>
+            </div>
+            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
+              <div className="flex flex-col">
+                <span className="text-sm font-medium">Vector Mode (.ai)</span>
+                <span className="text-[10px] text-gray-400">PNG → _vector.ai</span>
+              </div>
+              <button 
+                onClick={() => setVectorMode(!vectorMode)}
+                className={cn(
+                  "w-12 h-6 rounded-full transition-all relative",
+                  vectorMode ? "bg-blue-600" : "bg-gray-300"
+                )}
+              >
+                <div className={cn(
+                  "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                  vectorMode ? "left-7" : "left-1"
                 )} />
               </button>
             </div>
