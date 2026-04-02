@@ -371,7 +371,7 @@ const AdminDashboard = () => {
 function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
   const [promptsText, setPromptsText] = useState('');
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
-  const [selectedModel, setSelectedModel] = useState<'gemini-2.5-flash-image' | 'gemini-3.1-flash-image-preview'>('gemini-2.5-flash-image');
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-2.5-flash-image');
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
@@ -430,24 +430,40 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
       ));
 
       try {
-        const response = await ai.models.generateContent({
-          model: selectedModel,
-          contents: {
-            parts: [{ text: currentImage.prompt }],
-          },
-          config: {
-            imageConfig: {
-              aspectRatio: aspectRatio,
-              ...(selectedModel === 'gemini-3.1-flash-image-preview' && { imageSize: "1K" })
-            },
-          },
-        });
-
         let imageUrl = '';
-        for (const part of response.candidates?.[0]?.content?.parts || []) {
-          if (part.inlineData) {
-            imageUrl = `data:image/png;base64,${part.inlineData.data}`;
-            break;
+        const isImagen = selectedModel.startsWith('imagen-');
+
+        if (isImagen) {
+          const response = await ai.models.generateImages({
+            model: selectedModel,
+            prompt: currentImage.prompt,
+            config: {
+              numberOfImages: 1,
+              aspectRatio: aspectRatio as any,
+            },
+          });
+          if (response.generatedImages?.[0]?.image?.imageBytes) {
+            imageUrl = `data:image/png;base64,${response.generatedImages[0].image.imageBytes}`;
+          }
+        } else {
+          const response = await ai.models.generateContent({
+            model: selectedModel,
+            contents: {
+              parts: [{ text: currentImage.prompt }],
+            },
+            config: {
+              imageConfig: {
+                aspectRatio: aspectRatio,
+                ...(selectedModel === 'gemini-3.1-flash-image-preview' && { imageSize: "1K" })
+              },
+            },
+          });
+
+          for (const part of response.candidates?.[0]?.content?.parts || []) {
+            if (part.inlineData) {
+              imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+              break;
+            }
           }
         }
 
@@ -494,6 +510,16 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
               >
                 <option value="gemini-2.5-flash-image">Gemini 2.5 Flash Image (Standard)</option>
                 <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image (High Quality)</option>
+                <optgroup label="Imagen 4.0">
+                  <option value="imagen-4.0-generate-preview-06-01">Imagen 4.0 Generate Preview</option>
+                  <option value="imagen-4.0-ultra-generate-preview">Imagen 4.0 Ultra Preview</option>
+                  <option value="imagen-4.0-fast-generate-preview">Imagen 4.0 Fast Preview</option>
+                </optgroup>
+                <optgroup label="Imagen 3.0">
+                  <option value="imagen-3.0-generate-002">Imagen 3.0 Generate 002</option>
+                  <option value="imagen-3.0-generate-001">Imagen 3.0 Generate 001</option>
+                  <option value="imagen-3.0-fast-generate-001">Imagen 3.0 Fast 001</option>
+                </optgroup>
               </select>
             </div>
 
