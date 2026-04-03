@@ -930,6 +930,92 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
   const [globalGenerativeAI, setGlobalGenerativeAI] = useState(true);
   const [vectorMode, setVectorMode] = useState(false);
 
+  const processAdobeMetadata = useCallback(async (newItems: MetadataItem[], files: File[]) => {
+    setIsProcessing(true);
+    const apiKey = customApiKey || process.env.GEMINI_API_KEY;
+    const ai = new GoogleGenAI({ apiKey });
+
+    const processItem = async (item: MetadataItem, file: File) => {
+      setItems(prev => prev.map(it => it.id === item.id ? { ...it, status: 'processing' } : it));
+      
+      let attempts = 0;
+      const maxRetries = 2;
+      
+      while (attempts <= maxRetries) {
+        try {
+          const base64 = await fileToBase64(file);
+          const adobeCategories = `1: Animals, 2: Buildings, 3: Business, 4: Drinks, 5: Environment, 6: States of Mind, 7: Food, 8: Graphic Resources, 9: Hobbies, 10: Industry, 11: Landscapes, 12: Lifestyle, 13: People, 14: Plants, 15: Culture, 16: Science, 17: Social Issues, 18: Sports, 19: Technology, 20: Transport, 21: Travel`;
+
+          const response = await ai.models.generateContent({
+            model: selectedModel,
+            contents: {
+              parts: [
+                { inlineData: { data: base64.split(',')[1], mimeType: file.type } },
+                { text: `You are an Adobe Stock Metadata Expert. Analyze this image and provide:
+                1. Title: Descriptive, no keywords, max 70 chars.
+                2. Keywords: Exactly 49 keywords. CRITICAL: The first 10 must be the most relevant for search ranking.
+                3. Category: Choose the best ID from: ${adobeCategories}.
+                
+                Return JSON: {
+                  "title": "...",
+                  "keywords": "...",
+                  "category": "..."
+                }` }
+              ]
+            },
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  keywords: { type: Type.STRING },
+                  category: { type: Type.STRING }
+                },
+                required: ["title", "keywords", "category"]
+              }
+            }
+          });
+
+          const data = JSON.parse(response.text || '{}');
+          setItems(prev => prev.map(it => it.id === item.id ? { 
+            ...it, 
+            status: 'completed', 
+            title: data.title, 
+            keywords: data.keywords,
+            category: data.category
+          } : it));
+          return; // Success
+        } catch (error) {
+          attempts++;
+          if (attempts > maxRetries) {
+            setItems(prev => prev.map(it => it.id === item.id ? { ...it, status: 'error' } : it));
+          } else {
+            // Exponential backoff
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+          }
+        }
+      }
+    };
+
+    // Parallel processing with concurrency limit
+    const concurrencyLimit = 3;
+    const queue = [...newItems.map((item, index) => ({ item, file: files[index] }))];
+    
+    const processQueue = async () => {
+      while (queue.length > 0) {
+        const task = queue.shift();
+        if (task) {
+          await processItem(task.item, task.file);
+        }
+      }
+    };
+
+    const workers = Array(Math.min(concurrencyLimit, newItems.length)).fill(null).map(() => processQueue());
+    await Promise.all(workers);
+    setIsProcessing(false);
+  }, [customApiKey, selectedModel]);
+
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
     const newItems: MetadataItem[] = acceptedFiles.map(file => ({
@@ -944,73 +1030,12 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
     }));
     setItems(prev => [...prev, ...newItems]);
     processAdobeMetadata(newItems, acceptedFiles);
-  }, [globalGenerativeAI]);
+  }, [globalGenerativeAI, processAdobeMetadata]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop, 
     accept: { 'image/*': [] }
   } as any);
-
-  const processAdobeMetadata = async (newItems: MetadataItem[], files: File[]) => {
-    setIsProcessing(true);
-    const apiKey = customApiKey || process.env.GEMINI_API_KEY;
-    const ai = new GoogleGenAI({ apiKey });
-
-    const processItem = async (item: MetadataItem, file: File) => {
-      setItems(prev => prev.map(it => it.id === item.id ? { ...it, status: 'processing' } : it));
-      try {
-        const base64 = await fileToBase64(file);
-        const adobeCategories = `1: Animals, 2: Buildings, 3: Business, 4: Drinks, 5: Environment, 6: States of Mind, 7: Food, 8: Graphic Resources, 9: Hobbies, 10: Industry, 11: Landscapes, 12: Lifestyle, 13: People, 14: Plants, 15: Culture, 16: Science, 17: Social Issues, 18: Sports, 19: Technology, 20: Transport, 21: Travel`;
-
-        const response = await ai.models.generateContent({
-          model: selectedModel,
-          contents: {
-            parts: [
-              { inlineData: { data: base64.split(',')[1], mimeType: file.type } },
-              { text: `You are an Adobe Stock Metadata Expert. Analyze this image and provide:
-              1. Title: Descriptive, no keywords, max 70 chars.
-              2. Keywords: Exactly 49 keywords. CRITICAL: The first 10 must be the most relevant for search ranking.
-              3. Category: Choose the best ID from: ${adobeCategories}.
-              
-              Return JSON: {
-                "title": "...",
-                "keywords": "...",
-                "category": "..."
-              }` }
-            ]
-          },
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                keywords: { type: Type.STRING },
-                category: { type: Type.STRING }
-              },
-              required: ["title", "keywords", "category"]
-            }
-          }
-        });
-
-        const data = JSON.parse(response.text || '{}');
-        setItems(prev => prev.map(it => it.id === item.id ? { 
-          ...it, 
-          status: 'completed', 
-          title: data.title, 
-          keywords: data.keywords,
-          category: data.category
-        } : it));
-      } catch (error) {
-        setItems(prev => prev.map(it => it.id === item.id ? { ...it, status: 'error' } : it));
-      }
-    };
-
-    for (let i = 0; i < newItems.length; i++) {
-      await processItem(newItems[i], files[i]);
-    }
-    setIsProcessing(false);
-  };
 
   const downloadAdobeCSV = () => {
     const data = items.filter(it => it.status === 'completed').map(it => {
@@ -1054,8 +1079,9 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
                 onChange={(e) => setSelectedModel(e.target.value as any)}
                 className="w-full p-3 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-black outline-none transition-all"
               >
-                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Best for Audit)</option>
+                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (High Accuracy)</option>
                 <option value="gemini-3-flash-preview">Gemini 3 Flash (Fast)</option>
+                <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Lite (Speed)</option>
               </select>
             </div>
             <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
@@ -1105,7 +1131,7 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
             </div>
             <div>
               <h3 className="text-lg font-bold">Adobe Stock Hub</h3>
-              <p className="text-sm text-gray-400">Drop images here to generate Adobe-optimized metadata & audit policies.</p>
+              <p className="text-sm text-gray-400">Drop images here to generate Adobe-optimized metadata.</p>
             </div>
           </div>
         </div>
