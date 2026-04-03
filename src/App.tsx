@@ -12,6 +12,7 @@ import {
   AlertCircle,
   Maximize2,
   ExternalLink,
+  PlayCircle,
   Key,
   Sparkles,
   Copy,
@@ -476,8 +477,18 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
         }
       } catch (error: any) {
         console.error('Generation error:', error);
+        let friendlyMessage = error.message;
+        
+        if (error.message.toLowerCase().includes('quota') || error.message.toLowerCase().includes('rate limit')) {
+          friendlyMessage = "Kuota API habis atau terlalu banyak permintaan. Silakan tunggu 1-2 menit atau coba model lain (seperti Gemini 2.5 Flash).";
+        } else if (error.message.toLowerCase().includes('not found') || error.message.includes('404')) {
+          friendlyMessage = "Model ini belum tersedia untuk akun/wilayah Anda. Silakan gunakan Gemini 2.5 Flash Image atau Gemini 3.1 Flash Image.";
+        } else if (error.message.toLowerCase().includes('safety')) {
+          friendlyMessage = "Permintaan ditolak oleh filter keamanan konten AI.";
+        }
+
         setImages(prev => prev.map(img => 
-          img.id === currentImage.id ? { ...img, status: 'error', error: error.message } : img
+          img.id === currentImage.id ? { ...img, status: 'error', error: friendlyMessage } : img
         ));
       }
     };
@@ -510,16 +521,6 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
               >
                 <option value="gemini-2.5-flash-image">Gemini 2.5 Flash Image (Standard)</option>
                 <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image (High Quality)</option>
-                <optgroup label="Imagen 4.0">
-                  <option value="imagen-4.0-generate-preview-06-01">Imagen 4.0 Generate Preview</option>
-                  <option value="imagen-4.0-ultra-generate-preview">Imagen 4.0 Ultra Preview</option>
-                  <option value="imagen-4.0-fast-generate-preview">Imagen 4.0 Fast Preview</option>
-                </optgroup>
-                <optgroup label="Imagen 3.0">
-                  <option value="imagen-3.0-generate-002">Imagen 3.0 Generate 002</option>
-                  <option value="imagen-3.0-generate-001">Imagen 3.0 Generate 001</option>
-                  <option value="imagen-3.0-fast-generate-001">Imagen 3.0 Fast 001</option>
-                </optgroup>
               </select>
             </div>
 
@@ -1217,9 +1218,26 @@ function Settings({ apiKey, setApiKey }: { apiKey: string, setApiKey: (val: stri
           placeholder="Enter Gemini API Key"
           className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black outline-none"
         />
-        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline block">
-          Get your API key here
+        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+          <ExternalLink size={12} /> Get your API key here
         </a>
+        
+        <div className="pt-4 mt-2 border-t border-gray-100">
+          <a 
+            href="https://drive.google.com/file/d/1gwFxZemZM1VFJHxjI91ggblqGeDyjLMh/view?usp=drive_link" 
+            target="_blank" 
+            rel="noreferrer" 
+            className="group flex items-center gap-4 p-4 bg-red-50 border-2 border-red-200 rounded-2xl hover:bg-red-100 hover:border-red-300 transition-all"
+          >
+            <div className="w-12 h-12 bg-red-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-red-200 group-hover:scale-110 transition-transform">
+              <PlayCircle size={28} fill="currentColor" fillOpacity={0.2} />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-bold text-red-800">Tutorial Cara Mendapatkan API Key</span>
+              <span className="text-[11px] text-red-600 font-medium">Klik untuk melihat panduan video (Google Drive)</span>
+            </div>
+          </a>
+        </div>
       </div>
     </div>
   );
@@ -1297,7 +1315,7 @@ export default function App() {
                   </div>
                   <div className="flex flex-col">
                     <h1 className="text-xl font-semibold tracking-tight leading-none">Microstock AI</h1>
-                    <span className="text-[9px] font-bold text-gray-400 mt-1 tracking-[0.2em]">BY AHDAN</span>
+                    <span className="text-[9px] font-bold text-gray-400 mt-1 tracking-[0.2em]">Ahdan | CreativeTech</span>
                   </div>
                 </div>
                 
