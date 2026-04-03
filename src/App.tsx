@@ -971,13 +971,11 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
               1. Title: Descriptive, no keywords, max 70 chars.
               2. Keywords: Exactly 49 keywords. CRITICAL: The first 10 must be the most relevant for search ranking.
               3. Category: Choose the best ID from: ${adobeCategories}.
-              4. Policy Audit: Check for visible trademarks, logos, or anatomical errors (AI artifacts).
               
               Return JSON: {
                 "title": "...",
                 "keywords": "...",
-                "category": "...",
-                "audit": { "passed": true/false, "issues": ["issue1", "issue2"] }
+                "category": "..."
               }` }
             ]
           },
@@ -988,16 +986,9 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
               properties: {
                 title: { type: Type.STRING },
                 keywords: { type: Type.STRING },
-                category: { type: Type.STRING },
-                audit: {
-                  type: Type.OBJECT,
-                  properties: {
-                    passed: { type: Type.BOOLEAN },
-                    issues: { type: Type.ARRAY, items: { type: Type.STRING } }
-                  }
-                }
+                category: { type: Type.STRING }
               },
-              required: ["title", "keywords", "category", "audit"]
+              required: ["title", "keywords", "category"]
             }
           }
         });
@@ -1008,8 +999,7 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
           status: 'completed', 
           title: data.title, 
           keywords: data.keywords,
-          category: data.category,
-          policyAudit: data.audit
+          category: data.category
         } : it));
       } catch (error) {
         setItems(prev => prev.map(it => it.id === item.id ? { ...it, status: 'error' } : it));
@@ -1153,14 +1143,6 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
                 <div className="flex-1 min-w-0 space-y-1">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-bold truncate">{item.filename}</p>
-                    {item.policyAudit && (
-                      <span className={cn(
-                        "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border",
-                        item.policyAudit.passed ? "bg-green-50 text-green-600 border-green-100" : "bg-red-50 text-red-500 border-red-100"
-                      )}>
-                        {item.policyAudit.passed ? "Policy Passed" : "Policy Warning"}
-                      </span>
-                    )}
                   </div>
                   <p className="text-xs text-gray-500 font-medium line-clamp-1">
                     {item.title || (item.status === 'processing' ? 'Analyzing image...' : 'Pending...')}
@@ -1176,17 +1158,6 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
                     </div>
                   )}
                 </div>
-
-                {!item.policyAudit?.passed && item.policyAudit?.issues && (
-                  <div className="bg-red-50 p-3 rounded-2xl border border-red-100 max-w-xs w-full">
-                    <p className="text-[10px] font-bold text-red-600 uppercase mb-1 flex items-center gap-1">
-                      <AlertCircle size={10} /> Potential Issues:
-                    </p>
-                    <ul className="text-[10px] text-red-500 list-disc pl-3">
-                      {item.policyAudit.issues.map((issue, i) => <li key={i}>{issue}</li>)}
-                    </ul>
-                  </div>
-                )}
 
                 <div className="flex items-center gap-2">
                   <button 
