@@ -1234,6 +1234,21 @@ function Settings({ apiKey, setApiKey }: { apiKey: string, setApiKey: (val: stri
               <span className="text-[11px] text-red-600 font-medium">Klik untuk melihat panduan video (Google Drive)</span>
             </div>
           </a>
+
+          <a 
+            href="https://docs.google.com/document/d/1T9WiaGSyJLBYQUNspPYbugWy9tIQfGvBtiEllLovv1Q/edit?tab=t.0" 
+            target="_blank" 
+            rel="noreferrer" 
+            className="group flex items-center gap-4 p-4 bg-blue-50 border-2 border-blue-200 rounded-2xl hover:bg-blue-100 hover:border-blue-300 transition-all mt-3"
+          >
+            <div className="w-12 h-12 bg-blue-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200 group-hover:scale-110 transition-transform">
+              <FileSpreadsheet size={28} />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-bold text-blue-800">Panduan Teks API Key</span>
+              <span className="text-[11px] text-blue-600 font-medium">Klik untuk membaca panduan (Google Docs)</span>
+            </div>
+          </a>
         </div>
       </div>
     </div>
