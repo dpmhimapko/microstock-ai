@@ -10,6 +10,8 @@ import {
   Languages,
   CheckCircle2,
   AlertCircle,
+  Calendar,
+  TrendingUp,
   Maximize2,
   ExternalLink,
   PlayCircle,
@@ -1202,6 +1204,213 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
   );
 }
 
+function MarketTrends() {
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+
+  const trendData: Record<number, { events: { date: string, name: string, niche: string }[], niches: string[], ideas: string[] }> = {
+    0: { // Jan
+      events: [
+        { date: "Jan 1", name: "New Year's Day", niche: "Celebration, Resolutions" },
+        { date: "Jan 20", name: "Martin Luther King Jr. Day", niche: "Diversity, Civil Rights" }
+      ],
+      niches: ["Fitness & Health", "Organization", "Winter Landscapes", "Cozy Home"],
+      ideas: ["Person writing in a new planner", "Healthy meal prep containers", "Snowy mountain peaks at sunrise"]
+    },
+    1: { // Feb
+      events: [
+        { date: "Feb 14", name: "Valentine's Day", niche: "Romance, Love, Gifts" },
+        { date: "Feb 17", name: "Random Acts of Kindness Day", niche: "Community, Empathy" }
+      ],
+      niches: ["Love & Relationships", "Self-Care", "Spring Fashion Preview", "Indoor Gardening"],
+      ideas: ["Couple sharing a dessert", "Spa day at home with candles", "Close up of a blooming indoor plant"]
+    },
+    2: { // Mar
+      events: [
+        { date: "Mar 8", name: "International Women's Day", niche: "Empowerment, Leadership" },
+        { date: "Mar 17", name: "St. Patrick's Day", niche: "Irish Culture, Green" },
+        { date: "Mar 20", name: "First Day of Spring", niche: "Nature, Renewal" }
+      ],
+      niches: ["Women Empowerment", "Spring Cleaning", "Outdoor Activities", "Eco-friendly Living"],
+      ideas: ["Group of diverse women in a boardroom", "Person organizing a bright closet", "Bicycle on a park path with flowers"]
+    },
+    3: { // Apr
+      events: [
+        { date: "Apr 22", name: "Earth Day", niche: "Sustainability, Environment" },
+        { date: "Easter", name: "Easter Sunday", niche: "Family, Tradition" }
+      ],
+      niches: ["Sustainability", "Gardening", "Rainy Day Aesthetics", "Spring Weddings"],
+      ideas: ["Hands planting a tree", "Raindrops on a window with a blurred city", "Elegant outdoor wedding table setting"]
+    },
+    4: { // May
+      events: [
+        { date: "May 1", name: "Labor Day / May Day", niche: "Work, Spring" },
+        { date: "May 11", name: "Mother's Day", niche: "Family, Appreciation" }
+      ],
+      niches: ["Motherhood", "Graduation", "Summer Travel Prep", "Outdoor Dining"],
+      ideas: ["Mother and child laughing in a garden", "Graduation cap being thrown in the air", "Alfresco dinner party with fairy lights"]
+    },
+    5: { // Jun
+      events: [
+        { date: "Jun 8", name: "World Oceans Day", niche: "Marine Life, Conservation" },
+        { date: "Jun 15", name: "Father's Day", niche: "Family, Paternity" },
+        { date: "Jun 21", name: "Summer Solstice", niche: "Sun, Beach, Heat" }
+      ],
+      niches: ["Summer Vacation", "Beach Life", "Pride Month", "Fatherhood"],
+      ideas: ["Aerial view of a crowded beach", "Diverse group celebrating at a pride parade", "Father and son fishing by a lake"]
+    },
+    6: { // Jul
+      events: [
+        { date: "Jul 4", name: "Independence Day (USA)", niche: "Patriotism, Fireworks" },
+        { date: "Jul 30", name: "International Day of Friendship", niche: "Social, Connection" }
+      ],
+      niches: ["Tropical Travel", "Outdoor Sports", "Summer Festivals", "Ice Cream & Cool Treats"],
+      ideas: ["Friends having a BBQ in a backyard", "Surfer catching a wave at sunset", "Vibrant music festival crowd with lights"]
+    },
+    7: { // Aug
+      events: [
+        { date: "Aug 12", name: "International Youth Day", niche: "Education, Future" },
+        { date: "Aug 19", name: "World Photography Day", niche: "Art, Creativity" }
+      ],
+      niches: ["Back to School", "Late Summer Travel", "Harvest Season", "Camping"],
+      ideas: ["Student opening a laptop in a classroom", "Tent under a starry night sky", "Farmer harvesting fresh vegetables"]
+    },
+    8: { // Sep
+      events: [
+        { date: "Sep 21", name: "International Day of Peace", niche: "Global, Unity" },
+        { date: "Sep 22", name: "Autumn Equinox", niche: "Fall, Leaves" }
+      ],
+      niches: ["Autumn Aesthetics", "Education", "Cozy Fashion", "Mental Health Awareness"],
+      ideas: ["Golden autumn leaves on a wooden bench", "Person reading a book with a warm sweater", "Minimalist workspace with a cup of tea"]
+    },
+    9: { // Oct
+      events: [
+        { date: "Oct 10", name: "World Mental Health Day", niche: "Well-being, Support" },
+        { date: "Oct 31", name: "Halloween", niche: "Spooky, Costume, Party" }
+      ],
+      niches: ["Halloween", "Fall Harvest", "Baking & Comfort Food", "Hiking"],
+      ideas: ["Carved pumpkin with a glowing candle", "Freshly baked apple pie on a cooling rack", "Hiker standing on a rocky peak with fall colors"]
+    },
+    10: { // Nov
+      events: [
+        { date: "Nov 11", name: "Veterans Day", niche: "Honor, History" },
+        { date: "Nov 27", name: "Thanksgiving (USA)", niche: "Family, Food, Gratitude" }
+      ],
+      niches: ["Thanksgiving", "Black Friday / Shopping", "Early Winter", "Gratitude"],
+      ideas: ["Large family gathered around a turkey dinner", "Crowd of people shopping in a bright mall", "Frost on a window pane at dawn"]
+    },
+    11: { // Dec
+      events: [
+        { date: "Dec 25", name: "Christmas", niche: "Holiday, Tradition, Gifts" },
+        { date: "Dec 31", name: "New Year's Eve", niche: "Party, Celebration" }
+      ],
+      niches: ["Christmas & Holidays", "Winter Sports", "Charity & Giving", "New Year's Eve"],
+      ideas: ["Decorated Christmas tree in a cozy living room", "Skier gliding down a snowy slope", "Sparklers being held at a midnight party"]
+    }
+  };
+
+  const currentTrends = trendData[selectedMonth];
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-8"
+    >
+      <div className="bg-white p-8 rounded-[2.5rem] border border-gray-200 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+          <div>
+            <h2 className="text-2xl font-bold flex items-center gap-3">
+              <TrendingUp className="text-blue-600" size={28} />
+              Market Trends & Photo Ideas
+            </h2>
+            <p className="text-gray-500 mt-1">Temukan ide foto yang sedang laku berdasarkan musim dan event global.</p>
+          </div>
+          
+          <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-2xl border border-gray-100 overflow-x-auto scrollbar-hide">
+            {months.map((month, idx) => (
+              <button
+                key={idx}
+                onClick={() => setSelectedMonth(idx)}
+                className={cn(
+                  "px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap",
+                  selectedMonth === idx ? "bg-black text-white shadow-md" : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                )}
+              >
+                {month}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Events Calendar */}
+          <div className="space-y-4">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
+              <Calendar size={16} /> Major Events
+            </h3>
+            <div className="space-y-3">
+              {currentTrends.events.map((event, i) => (
+                <div key={i} className="p-4 bg-blue-50 border border-blue-100 rounded-2xl group hover:bg-blue-100 transition-colors">
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="text-[10px] font-bold text-blue-600 uppercase">{event.date}</span>
+                  </div>
+                  <h4 className="font-bold text-blue-900">{event.name}</h4>
+                  <p className="text-xs text-blue-700 mt-1 opacity-80">Niche: {event.niche}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Trending Niches */}
+          <div className="space-y-4">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
+              <Sparkles size={16} /> Trending Niches
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {currentTrends.niches.map((niche, i) => (
+                <span key={i} className="px-4 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm font-medium text-gray-700 hover:border-gray-300 transition-colors">
+                  {niche}
+                </span>
+              ))}
+            </div>
+            <div className="p-6 bg-gradient-to-br from-gray-900 to-black rounded-3xl text-white mt-4">
+              <h4 className="font-bold mb-2 flex items-center gap-2">
+                <ShieldCheck size={18} className="text-green-400" />
+                Pro Tip
+              </h4>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                Upload foto 2-3 bulan sebelum event dimulai agar terindeks dengan baik oleh mesin pencari Microstock.
+              </p>
+            </div>
+          </div>
+
+          {/* Photo Ideas */}
+          <div className="space-y-4">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
+              <ImageIcon size={16} /> Photo Concepts
+            </h3>
+            <div className="space-y-3">
+              {currentTrends.ideas.map((idea, i) => (
+                <div key={i} className="p-4 border border-gray-100 rounded-2xl flex gap-4 items-start group hover:border-gray-300 transition-colors">
+                  <div className="w-8 h-8 bg-gray-50 rounded-lg flex items-center justify-center text-gray-400 flex-shrink-0 group-hover:bg-black group-hover:text-white transition-colors">
+                    {i + 1}
+                  </div>
+                  <p className="text-sm text-gray-600 leading-relaxed">{idea}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 function Settings({ apiKey, setApiKey }: { apiKey: string, setApiKey: (val: string) => void }) {
   return (
     <div className="max-w-md mx-auto bg-white p-8 rounded-3xl border border-gray-200 shadow-sm">
@@ -1261,7 +1470,7 @@ export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'batch' | 'promptGen' | 'adobeHub' | 'settings' | 'admin'>('batch');
+  const [activeTab, setActiveTab] = useState<'batch' | 'promptGen' | 'adobeHub' | 'marketTrends' | 'settings' | 'admin'>('batch');
   const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('gemini_api_key') || '');
 
   useEffect(() => {
@@ -1375,6 +1584,12 @@ export default function App() {
                     label="Adobe Stock Hub" 
                   />
                   <TabButton 
+                    active={activeTab === 'marketTrends'} 
+                    onClick={() => setActiveTab('marketTrends')} 
+                    icon={TrendingUp} 
+                    label="Market Trends" 
+                  />
+                  <TabButton 
                     active={activeTab === 'settings'} 
                     onClick={() => setActiveTab('settings')} 
                     icon={Key} 
@@ -1402,6 +1617,9 @@ export default function App() {
                   </div>
                   <div className={cn(activeTab !== 'adobeHub' && "hidden")}>
                     <AdobeStockHub customApiKey={customApiKey} />
+                  </div>
+                  <div className={cn(activeTab !== 'marketTrends' && "hidden")}>
+                    <MarketTrends />
                   </div>
                   <div className={cn(activeTab !== 'settings' && "hidden")}>
                     <Settings apiKey={customApiKey} setApiKey={setCustomApiKey} />
