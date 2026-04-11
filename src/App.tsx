@@ -371,7 +371,7 @@ const AdminDashboard = () => {
 
 // --- Feature Components (Original) ---
 
-function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
+function BatchImageGen({ customApiKey, serviceAccount }: { customApiKey?: string, serviceAccount?: string }) {
   const [promptsText, setPromptsText] = useState('');
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
   const [selectedModel, setSelectedModel] = useState<string>('gemini-2.5-flash-image');
@@ -434,38 +434,59 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
 
       try {
         let imageUrl = '';
-        const isImagen = selectedModel.startsWith('imagen-');
 
-        if (isImagen) {
-          const response = await ai.models.generateImages({
-            model: selectedModel,
-            prompt: currentImage.prompt,
-            config: {
-              numberOfImages: 1,
-              aspectRatio: aspectRatio as any,
-            },
+        if (serviceAccount) {
+          const response = await fetch('/api/vertex-ai', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              serviceAccount,
+              model: selectedModel,
+              prompt: currentImage.prompt,
+              isImageGen: true,
+              aspectRatio
+            })
           });
-          if (response.generatedImages?.[0]?.image?.imageBytes) {
-            imageUrl = `data:image/png;base64,${response.generatedImages[0].image.imageBytes}`;
+          if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Backend error');
           }
+          const result = await response.json();
+          imageUrl = result.imageUrl;
         } else {
-          const response = await ai.models.generateContent({
-            model: selectedModel,
-            contents: {
-              parts: [{ text: currentImage.prompt }],
-            },
-            config: {
-              imageConfig: {
-                aspectRatio: aspectRatio,
-                ...(selectedModel === 'gemini-3.1-flash-image-preview' && { imageSize: "1K" })
-              },
-            },
-          });
+          const isImagen = selectedModel.startsWith('imagen-');
 
-          for (const part of response.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData) {
-              imageUrl = `data:image/png;base64,${part.inlineData.data}`;
-              break;
+          if (isImagen) {
+            const response = await ai.models.generateImages({
+              model: selectedModel,
+              prompt: currentImage.prompt,
+              config: {
+                numberOfImages: 1,
+                aspectRatio: aspectRatio as any,
+              },
+            });
+            if (response.generatedImages?.[0]?.image?.imageBytes) {
+              imageUrl = `data:image/png;base64,${response.generatedImages[0].image.imageBytes}`;
+            }
+          } else {
+            const response = await ai.models.generateContent({
+              model: selectedModel,
+              contents: {
+                parts: [{ text: currentImage.prompt }],
+              },
+              config: {
+                imageConfig: {
+                  aspectRatio: aspectRatio,
+                  ...(selectedModel === 'gemini-3.1-flash-image-preview' && { imageSize: "1K" })
+                },
+              },
+            });
+
+            for (const part of response.candidates?.[0]?.content?.parts || []) {
+              if (part.inlineData) {
+                imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+                break;
+              }
             }
           }
         }
@@ -656,7 +677,7 @@ function BatchImageGen({ customApiKey }: { customApiKey?: string }) {
   );
 }
 
-function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
+function PromptBuilder({ customApiKey, serviceAccount }: { customApiKey?: string, serviceAccount?: string }) {
   const [concept, setConcept] = useState('');
   const [brief, setBrief] = useState('');
   const [count, setCount] = useState<number | string>(5);
@@ -708,20 +729,7 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
       const finalCount = isCustom ? Number(count) : count;
       const variationsText = selectedVariations.map(v => variationOptions.find(opt => opt.id === v)?.label).join(', ');
       
-      const parts: any[] = [];
-      
-      if (file) {
-        const base64 = await fileToBase64(file);
-        parts.push({
-          inlineData: {
-            data: base64.split(',')[1],
-            mimeType: file.type
-          }
-        });
-      }
-
-      parts.push({
-        text: `Generate ${finalCount} high-quality, detailed AI image generation prompts.
+      const prompt = `Generate ${finalCount} high-quality, detailed AI image generation prompts.
         ${concept ? `Base them on this concept: "${concept}".` : "Base them on the provided image."}
         ${brief ? `ADDITIONAL BRIEF/INSTRUCTIONS: "${brief}". You MUST strictly follow these instructions in every generated prompt.` : ""}
         
@@ -729,23 +737,58 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
         1. SUBJECT CONSISTENCY: You MUST maintain the EXACT SAME SUBJECT as seen in the reference image or described in the concept.
         2. STYLE CONSISTENCY: Maintain a consistent artistic style across all prompts.
         3. VARIATIONS: Create diversity by varying ONLY the following aspects: ${variationsText || "general composition"}.
-        4. FORMAT: Return ONLY a JSON array of strings, no other text.`
-      });
+        4. FORMAT: Return ONLY a JSON array of strings, no other text.`;
 
-      const response = await ai.models.generateContent({
-        model: selectedModel,
-        contents: { parts: parts },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING }
-          }
+      if (serviceAccount) {
+        const base64 = file ? await fileToBase64(file) : null;
+        const response = await fetch('/api/vertex-ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            serviceAccount,
+            model: selectedModel,
+            prompt,
+            mimeType: file?.type,
+            base64Data: base64 ? base64.split(',')[1] : null
+          })
+        });
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || 'Backend error');
         }
-      });
+        const result = await response.json();
+        const data = typeof result.text === 'string' ? JSON.parse(result.text.replace(/```json|```/g, '')) : result.text;
+        setResults(data);
+      } else {
+        const parts: any[] = [];
+        
+        if (file) {
+          const base64 = await fileToBase64(file);
+          parts.push({
+            inlineData: {
+              data: base64.split(',')[1],
+              mimeType: file.type
+            }
+          });
+        }
 
-      const data = JSON.parse(response.text || '[]');
-      setResults(data);
+        parts.push({ text: prompt });
+
+        const response = await ai.models.generateContent({
+          model: selectedModel,
+          contents: { parts: parts },
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING }
+            }
+          }
+        });
+
+        const data = JSON.parse(response.text || '[]');
+        setResults(data);
+      }
     } catch (error) {
       console.error('Prompt generation error:', error);
     } finally {
@@ -925,7 +968,7 @@ function PromptBuilder({ customApiKey }: { customApiKey?: string }) {
   );
 }
 
-function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
+function AdobeStockHub({ customApiKey, serviceAccount }: { customApiKey?: string, serviceAccount?: string }) {
   const [items, setItems] = useState<MetadataItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-3.1-pro-preview' | 'gemini-3.1-flash-lite-preview'>('gemini-3-flash-preview');
@@ -947,13 +990,7 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
         try {
           const base64 = await fileToBase64(file);
           const adobeCategories = `1: Animals, 2: Buildings, 3: Business, 4: Drinks, 5: Environment, 6: States of Mind, 7: Food, 8: Graphic Resources, 9: Hobbies, 10: Industry, 11: Landscapes, 12: Lifestyle, 13: People, 14: Plants, 15: Culture, 16: Science, 17: Social Issues, 18: Sports, 19: Technology, 20: Transport, 21: Travel`;
-
-          const response = await ai.models.generateContent({
-            model: selectedModel,
-            contents: {
-              parts: [
-                { inlineData: { data: base64.split(',')[1], mimeType: file.type } },
-                { text: `You are an Adobe Stock Metadata Expert. Analyze this image and provide:
+          const prompt = `You are an Adobe Stock Metadata Expert. Analyze this image and provide:
                 1. Title: Descriptive, no keywords, max 70 chars.
                 2. Keywords: Exactly 49 keywords. CRITICAL: The first 10 must be the most relevant for search ranking.
                 3. Category: Choose the best ID from: ${adobeCategories}.
@@ -962,24 +999,54 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
                   "title": "...",
                   "keywords": "...",
                   "category": "..."
-                }` }
-              ]
-            },
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  keywords: { type: Type.STRING },
-                  category: { type: Type.STRING }
-                },
-                required: ["title", "keywords", "category"]
-              }
-            }
-          });
+                }`;
 
-          const data = JSON.parse(response.text || '{}');
+          let data: any;
+
+          if (serviceAccount) {
+            const response = await fetch('/api/vertex-ai', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                serviceAccount,
+                model: selectedModel,
+                prompt,
+                mimeType: file.type,
+                base64Data: base64.split(',')[1]
+              })
+            });
+            if (!response.ok) {
+              const err = await response.json();
+              throw new Error(err.error || 'Backend error');
+            }
+            const result = await response.json();
+            // Vertex AI might return raw text that needs parsing if not using responseMimeType
+            data = typeof result.text === 'string' ? JSON.parse(result.text.replace(/```json|```/g, '')) : result.text;
+          } else {
+            const response = await ai.models.generateContent({
+              model: selectedModel,
+              contents: {
+                parts: [
+                  { inlineData: { data: base64.split(',')[1], mimeType: file.type } },
+                  { text: prompt }
+                ]
+              },
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    keywords: { type: Type.STRING },
+                    category: { type: Type.STRING }
+                  },
+                  required: ["title", "keywords", "category"]
+                }
+              }
+            });
+            data = JSON.parse(response.text || '{}');
+          }
+
           setItems(prev => prev.map(it => it.id === item.id ? { 
             ...it, 
             status: 'completed', 
@@ -993,7 +1060,6 @@ function AdobeStockHub({ customApiKey }: { customApiKey?: string }) {
           if (attempts > maxRetries) {
             setItems(prev => prev.map(it => it.id === item.id ? { ...it, status: 'error' } : it));
           } else {
-            // Exponential backoff
             await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
           }
         }
@@ -1411,53 +1477,134 @@ function MarketTrends() {
   );
 }
 
-function Settings({ apiKey, setApiKey }: { apiKey: string, setApiKey: (val: string) => void }) {
-  return (
-    <div className="max-w-md mx-auto bg-white p-8 rounded-3xl border border-gray-200 shadow-sm">
-      <h2 className="text-xl font-bold mb-4">API Settings</h2>
-      <p className="text-sm text-gray-500 mb-6">Enter your custom Gemini API key to bypass default limits.</p>
-      <div className="space-y-4">
-        <input 
-          type="password" 
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          placeholder="Enter Gemini API Key"
-          className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black outline-none"
-        />
-        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-          <ExternalLink size={12} /> Get your API key here
-        </a>
-        
-        <div className="pt-4 mt-2 border-t border-gray-100">
-          <a 
-            href="https://drive.google.com/file/d/1gwFxZemZM1VFJHxjI91ggblqGeDyjLMh/view?usp=drive_link" 
-            target="_blank" 
-            rel="noreferrer" 
-            className="group flex items-center gap-4 p-4 bg-red-50 border-2 border-red-200 rounded-2xl hover:bg-red-100 hover:border-red-300 transition-all"
-          >
-            <div className="w-12 h-12 bg-red-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-red-200 group-hover:scale-110 transition-transform">
-              <PlayCircle size={28} fill="currentColor" fillOpacity={0.2} />
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-bold text-red-800">Tutorial Cara Mendapatkan API Key</span>
-              <span className="text-[11px] text-red-600 font-medium">Klik untuk melihat panduan video (Google Drive)</span>
-            </div>
-          </a>
+function Settings({ 
+  apiKey, 
+  setApiKey,
+  serviceAccount,
+  setServiceAccount
+}: { 
+  apiKey: string, 
+  setApiKey: (val: string) => void,
+  serviceAccount: string,
+  setServiceAccount: (val: string) => void
+}) {
+  const [authMode, setAuthMode] = useState<'api' | 'sa'>(serviceAccount ? 'sa' : 'api');
 
-          <a 
-            href="https://docs.google.com/document/d/1T9WiaGSyJLBYQUNspPYbugWy9tIQfGvBtiEllLovv1Q/edit?tab=t.0" 
-            target="_blank" 
-            rel="noreferrer" 
-            className="group flex items-center gap-4 p-4 bg-blue-50 border-2 border-blue-200 rounded-2xl hover:bg-blue-100 hover:border-blue-300 transition-all mt-3"
-          >
-            <div className="w-12 h-12 bg-blue-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200 group-hover:scale-110 transition-transform">
-              <FileSpreadsheet size={28} />
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
+        try {
+          JSON.parse(content); // Validate JSON
+          setServiceAccount(content);
+          setAuthMode('sa');
+        } catch (err) {
+          alert("Invalid JSON file");
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto bg-white p-8 rounded-3xl border border-gray-200 shadow-sm">
+      <h2 className="text-xl font-bold mb-4">API Settings</h2>
+      <p className="text-sm text-gray-500 mb-6">Pilih metode autentikasi untuk menggunakan fitur AI.</p>
+      
+      <div className="flex gap-2 mb-8 bg-gray-50 p-1.5 rounded-2xl border border-gray-100">
+        <button
+          onClick={() => setAuthMode('api')}
+          className={cn(
+            "flex-1 py-3 rounded-xl text-sm font-bold transition-all",
+            authMode === 'api' ? "bg-white text-black shadow-sm" : "text-gray-400 hover:text-gray-600"
+          )}
+        >
+          Gemini API Key
+        </button>
+        <button
+          onClick={() => setAuthMode('sa')}
+          className={cn(
+            "flex-1 py-3 rounded-xl text-sm font-bold transition-all",
+            authMode === 'sa' ? "bg-white text-black shadow-sm" : "text-gray-400 hover:text-gray-600"
+          )}
+        >
+          Service Account (JSON)
+        </button>
+      </div>
+
+      <div className="space-y-6">
+        {authMode === 'api' ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm font-bold text-gray-700">
+              <Key size={16} /> Gemini API Key
             </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-bold text-blue-800">Panduan Teks API Key</span>
-              <span className="text-[11px] text-blue-600 font-medium">Klik untuk membaca panduan (Google Docs)</span>
+            <input 
+              type="password" 
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="Enter Gemini API Key"
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black outline-none"
+            />
+            <div className="flex flex-col gap-2">
+              <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                <ExternalLink size={12} /> Get your API key here
+              </a>
             </div>
-          </a>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm font-bold text-gray-700">
+              <ShieldCheck size={16} /> Service Account Key (JSON)
+            </div>
+            <div className="relative">
+              <textarea 
+                value={serviceAccount}
+                onChange={(e) => setServiceAccount(e.target.value)}
+                placeholder='Paste your Service Account JSON here...'
+                className="w-full h-48 px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black outline-none font-mono text-xs resize-none"
+              />
+              <div className="absolute bottom-4 right-4">
+                <label className="cursor-pointer bg-black text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-gray-800 transition-colors flex items-center gap-2">
+                  <Plus size={14} /> Upload JSON
+                  <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
+                </label>
+              </div>
+            </div>
+            <p className="text-[10px] text-gray-400 italic">
+              *Service Account Key digunakan untuk akses Vertex AI (Google Cloud). Data ini disimpan secara lokal di browser Anda.
+            </p>
+          </div>
+        )}
+        
+        <div className="pt-6 border-t border-gray-100 space-y-3">
+          <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Panduan & Tutorial</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <a 
+              href="https://drive.google.com/file/d/1gwFxZemZM1VFJHxjI91ggblqGeDyjLMh/view?usp=drive_link" 
+              target="_blank" 
+              rel="noreferrer" 
+              className="group flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-xl hover:bg-red-100 transition-all"
+            >
+              <div className="w-8 h-8 bg-red-500 rounded-lg flex items-center justify-center text-white">
+                <PlayCircle size={18} />
+              </div>
+              <span className="text-xs font-bold text-red-800">Tutorial Video</span>
+            </a>
+
+            <a 
+              href="https://docs.google.com/document/d/1T9WiaGSyJLBYQUNspPYbugWy9tIQfGvBtiEllLovv1Q/edit?tab=t.0" 
+              target="_blank" 
+              rel="noreferrer" 
+              className="group flex items-center gap-3 p-3 bg-blue-50 border border-blue-100 rounded-xl hover:bg-blue-100 transition-all"
+            >
+              <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center text-white">
+                <FileSpreadsheet size={18} />
+              </div>
+              <span className="text-xs font-bold text-blue-800">Panduan Teks</span>
+            </a>
+          </div>
         </div>
       </div>
     </div>
@@ -1472,6 +1619,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'batch' | 'promptGen' | 'adobeHub' | 'marketTrends' | 'settings' | 'admin'>('batch');
   const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('gemini_api_key') || '');
+  const [serviceAccount, setServiceAccount] = useState<string>(() => localStorage.getItem('service_account_json') || '');
 
   useEffect(() => {
     if (customApiKey) {
@@ -1480,6 +1628,14 @@ export default function App() {
       localStorage.removeItem('gemini_api_key');
     }
   }, [customApiKey]);
+
+  useEffect(() => {
+    if (serviceAccount) {
+      localStorage.setItem('service_account_json', serviceAccount);
+    } else {
+      localStorage.removeItem('service_account_json');
+    }
+  }, [serviceAccount]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -1610,19 +1766,24 @@ export default function App() {
               ) : (
                 <div className="space-y-8">
                   <div className={cn(activeTab !== 'batch' && "hidden")}>
-                    <BatchImageGen customApiKey={customApiKey} />
+                    <BatchImageGen customApiKey={customApiKey} serviceAccount={serviceAccount} />
                   </div>
                   <div className={cn(activeTab !== 'promptGen' && "hidden")}>
-                    <PromptBuilder customApiKey={customApiKey} />
+                    <PromptBuilder customApiKey={customApiKey} serviceAccount={serviceAccount} />
                   </div>
                   <div className={cn(activeTab !== 'adobeHub' && "hidden")}>
-                    <AdobeStockHub customApiKey={customApiKey} />
+                    <AdobeStockHub customApiKey={customApiKey} serviceAccount={serviceAccount} />
                   </div>
                   <div className={cn(activeTab !== 'marketTrends' && "hidden")}>
                     <MarketTrends />
                   </div>
                   <div className={cn(activeTab !== 'settings' && "hidden")}>
-                    <Settings apiKey={customApiKey} setApiKey={setCustomApiKey} />
+                    <Settings 
+                      apiKey={customApiKey} 
+                      setApiKey={setCustomApiKey} 
+                      serviceAccount={serviceAccount}
+                      setServiceAccount={setServiceAccount}
+                    />
                   </div>
                 </div>
               )}
