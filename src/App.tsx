@@ -1624,11 +1624,17 @@ function Settings({
         })
       });
       
-      const data = await response.json();
-      if (response.ok) {
-        setTestStatus('success');
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        const data = await response.json();
+        if (response.ok) {
+          setTestStatus('success');
+        } else {
+          throw new Error(data.error || 'Gagal terhubung ke Vertex AI');
+        }
       } else {
-        throw new Error(data.error || 'Gagal terhubung ke Vertex AI');
+        const text = await response.text();
+        throw new Error(`Server returned non-JSON (${response.status}): ${text.slice(0, 100)}...`);
       }
     } catch (err: any) {
       setTestStatus('error');
@@ -1660,6 +1666,8 @@ function Settings({
       }
     };
     checkServer();
+    const interval = setInterval(checkServer, 10000); // Check every 10s
+    return () => clearInterval(interval);
   }, []);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
