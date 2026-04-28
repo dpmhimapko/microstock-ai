@@ -1609,6 +1609,8 @@ function Settings({
   const [isSaving, setIsSaving] = useState(false);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [testError, setTestError] = useState<string | null>(null);
+  const [tokenInfo, setTokenInfo] = useState<{token: string, projectId: string} | null>(null);
+  const [isGettingToken, setIsGettingToken] = useState(false);
 
   const testConnection = async () => {
     setTestStatus('testing');
@@ -1639,6 +1641,27 @@ function Settings({
     } catch (err: any) {
       setTestStatus('error');
       setTestError(err.message);
+    }
+  };
+
+  const exchangeToken = async () => {
+    setIsGettingToken(true);
+    try {
+      const response = await fetch('/api/get-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serviceAccount })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setTokenInfo(data);
+      } else {
+        alert(data.error || "Gagal mengambil token");
+      }
+    } catch (err) {
+      alert("Terjadi kesalahan jaringan");
+    } finally {
+      setIsGettingToken(false);
     }
   };
 
@@ -1763,19 +1786,29 @@ function Settings({
               </div>
               <div className="flex items-center gap-2">
                 {serviceAccount && (
+                  <>
                    <button 
-                   onClick={testConnection}
-                   disabled={testStatus === 'testing'}
-                   className={cn(
-                     "px-3 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all",
-                     testStatus === 'success' ? "bg-green-100 text-green-700" : 
-                     testStatus === 'error' ? "bg-red-100 text-red-700" :
-                     "bg-blue-100 text-blue-700 hover:bg-blue-200"
-                   )}
-                 >
-                   {testStatus === 'testing' ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
-                   {testStatus === 'success' ? "CONNECTED" : testStatus === 'testing' ? "TESTING..." : "TEST CONNECTION"}
-                 </button>
+                     onClick={exchangeToken}
+                     disabled={isGettingToken}
+                     className="px-3 py-1 bg-gray-100 text-gray-700 rounded-lg text-[10px] font-bold hover:bg-gray-200 flex items-center gap-1"
+                   >
+                     {isGettingToken ? <Loader2 size={10} className="animate-spin" /> : <Key size={10} />}
+                     GET BEARER
+                   </button>
+                   <button 
+                     onClick={testConnection}
+                     disabled={testStatus === 'testing'}
+                     className={cn(
+                       "px-3 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all",
+                       testStatus === 'success' ? "bg-green-100 text-green-700" : 
+                       testStatus === 'error' ? "bg-red-100 text-red-700" :
+                       "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                     )}
+                   >
+                     {testStatus === 'testing' ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                     {testStatus === 'success' ? "CONNECTED" : testStatus === 'testing' ? "TESTING..." : "TEST"}
+                   </button>
+                  </>
                 )}
                 <button 
                   onClick={() => saveToProfile({ serviceAccountJson: serviceAccount })}
@@ -1785,6 +1818,25 @@ function Settings({
                 </button>
               </div>
             </div>
+            
+            {tokenInfo && (
+              <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl relative overflow-hidden">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[9px] font-bold text-blue-600 uppercase">Bearer Token (Active)</span>
+                  <span className="text-[9px] text-blue-400 font-mono">{tokenInfo.projectId}</span>
+                </div>
+                <div className="text-[8px] font-mono text-blue-800 break-all bg-white/50 p-2 rounded border border-blue-100 select-all">
+                  {tokenInfo.token}
+                </div>
+                <button 
+                  onClick={() => setTokenInfo(null)}
+                  className="absolute top-2 right-2 text-blue-400 hover:text-blue-600"
+                >
+                  <Plus size={10} className="rotate-45" />
+                </button>
+              </div>
+            )}
+
             <div className="relative">
               <textarea 
                 value={serviceAccount}
