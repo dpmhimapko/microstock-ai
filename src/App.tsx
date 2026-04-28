@@ -74,17 +74,28 @@ interface GeneratedImage {
 interface MetadataItem {
   id: string;
   filename: string;
+  type: 'image' | 'video';
   title: string;
   keywords: string;
   category: string;
+  shutterstockCategory1: string;
+  shutterstockCategory2: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
   previewUrl: string;
   isGenerativeAI: boolean;
+  isIllustration: boolean;
   policyAudit?: {
     passed: boolean;
     issues: string[];
   };
 }
+
+const SHUTTERSTOCK_CATEGORIES = [
+  "Animals/Wildlife", "Art", "Backgrounds/Textures", "Buildings/Landmarks", 
+  "Business/Finance", "Education", "Food and Drink", "Healthcare/Medical", 
+  "Holidays", "Industrial", "Nature", "Objects", "People", "Religion", 
+  "Science", "Signs/Symbols", "Sports/Recreation", "Technology", "Transportation"
+];
 
 interface UserProfile {
   uid: string;
@@ -94,6 +105,8 @@ interface UserProfile {
   role: 'admin' | 'user';
   isApproved: boolean;
   createdAt: any;
+  customApiKey?: string;
+  serviceAccountJson?: string;
 }
 
 interface AuthContextType {
@@ -447,9 +460,17 @@ function BatchImageGen({ customApiKey, serviceAccount }: { customApiKey?: string
               aspectRatio
             })
           });
+
           if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.error || 'Backend error');
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+              const err = await response.json();
+              throw new Error(err.error || 'Backend error');
+            } else {
+              const text = await response.text();
+              console.error("Non-JSON error response:", text);
+              throw new Error(`Server Error (${response.status}). Imagen mungkin belum aktif di project ini.`);
+            }
           }
           const result = await response.json();
           imageUrl = result.imageUrl;
@@ -720,12 +741,12 @@ function PromptBuilder({ customApiKey, serviceAccount }: { customApiKey?: string
 
   const generatePrompts = async () => {
     if (!concept.trim() && !file) return;
+    const apiKey = customApiKey || process.env.GEMINI_API_KEY;
+    const ai = new GoogleGenAI({ apiKey });
     setIsGenerating(true);
     setResults([]);
 
     try {
-      const apiKey = customApiKey || process.env.GEMINI_API_KEY;
-      const ai = new GoogleGenAI({ apiKey });
       const finalCount = isCustom ? Number(count) : count;
       const variationsText = selectedVariations.map(v => variationOptions.find(opt => opt.id === v)?.label).join(', ');
       
@@ -968,14 +989,15 @@ function PromptBuilder({ customApiKey, serviceAccount }: { customApiKey?: string
   );
 }
 
-function AdobeStockHub({ customApiKey, serviceAccount }: { customApiKey?: string, serviceAccount?: string }) {
+function MicrostockHub({ customApiKey, serviceAccount }: { customApiKey?: string, serviceAccount?: string }) {
   const [items, setItems] = useState<MetadataItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-3.1-pro-preview' | 'gemini-3.1-flash-lite-preview'>('gemini-3-flash-preview');
   const [globalGenerativeAI, setGlobalGenerativeAI] = useState(true);
   const [vectorMode, setVectorMode] = useState(false);
+  const [activePlatform, setActivePlatform] = useState<'adobe' | 'shutterstock'>('adobe');
 
-  const processAdobeMetadata = useCallback(async (newItems: MetadataItem[], files: File[]) => {
+  const processMicrostock = useCallback(async (newItems: MetadataItem[], files: File[]) => {
     setIsProcessing(true);
     const apiKey = customApiKey || process.env.GEMINI_API_KEY;
     const ai = new GoogleGenAI({ apiKey });
@@ -990,15 +1012,23 @@ function AdobeStockHub({ customApiKey, serviceAccount }: { customApiKey?: string
         try {
           const base64 = await fileToBase64(file);
           const adobeCategories = `1: Animals, 2: Buildings, 3: Business, 4: Drinks, 5: Environment, 6: States of Mind, 7: Food, 8: Graphic Resources, 9: Hobbies, 10: Industry, 11: Landscapes, 12: Lifestyle, 13: People, 14: Plants, 15: Culture, 16: Science, 17: Social Issues, 18: Sports, 19: Technology, 20: Transport, 21: Travel`;
-          const prompt = `You are an Adobe Stock Metadata Expert. Analyze this image and provide:
-                1. Title: Descriptive, no keywords, max 70 chars.
-                2. Keywords: Exactly 49 keywords. CRITICAL: The first 10 must be the most relevant for search ranking.
-                3. Category: Choose the best ID from: ${adobeCategories}.
+          const shutterstockCats = SHUTTERSTOCK_CATEGORIES.join(", ");
+          
+          const prompt = `You are a Microstock Metadata Expert. Analyze this ${item.type} and provide metadata for both Adobe Stock and Shutterstock:
+                1. Title/Description: Descriptive, catchy, no keywords, max 70 chars. Optimized for SEO.
+                2. Keywords: Exactly 49 keywords. High commercial value, easy to search, diverse but relevant phrases. No trademarks.
+                3. Adobe Category ID: Choose the best ID from: ${adobeCategories}.
+                4. Shutterstock Category 1: Choose the primary category name from: ${shutterstockCats}.
+                5. Shutterstock Category 2: Choose a secondary relevant category name from: ${shutterstockCats} (Optional, return empty string if no fit).
+                6. Illustration (for images only): Return true if digital illustration/AI-generated, false if realistic photo.
                 
                 Return JSON: {
                   "title": "...",
                   "keywords": "...",
-                  "category": "..."
+                  "adobeCategory": "...",
+                  "shutterstockCategory1": "...",
+                  "shutterstockCategory2": "...",
+                  "isIllustration": boolean
                 }`;
 
           let data: any;
@@ -1015,13 +1045,19 @@ function AdobeStockHub({ customApiKey, serviceAccount }: { customApiKey?: string
                 base64Data: base64.split(',')[1]
               })
             });
+
             if (!response.ok) {
-              const err = await response.json();
-              throw new Error(err.error || 'Backend error');
+              const contentType = response.headers.get("content-type");
+              if (contentType && contentType.includes("application/json")) {
+                const err = await response.json();
+                throw new Error(err.error || 'Backend error');
+              } else {
+                throw new Error(`Server Error (${response.status})`);
+              }
             }
             const result = await response.json();
-            // Vertex AI might return raw text that needs parsing if not using responseMimeType
-            data = typeof result.text === 'string' ? JSON.parse(result.text.replace(/```json|```/g, '')) : result.text;
+            const textToParse = typeof result.text === 'string' ? result.text : JSON.stringify(result.text);
+            data = JSON.parse(textToParse.replace(/```json|```/g, ''));
           } else {
             const response = await ai.models.generateContent({
               model: selectedModel,
@@ -1038,9 +1074,12 @@ function AdobeStockHub({ customApiKey, serviceAccount }: { customApiKey?: string
                   properties: {
                     title: { type: Type.STRING },
                     keywords: { type: Type.STRING },
-                    category: { type: Type.STRING }
+                    adobeCategory: { type: Type.STRING },
+                    shutterstockCategory1: { type: Type.STRING },
+                    shutterstockCategory2: { type: Type.STRING },
+                    isIllustration: { type: Type.BOOLEAN }
                   },
-                  required: ["title", "keywords", "category"]
+                  required: ["title", "keywords", "adobeCategory", "shutterstockCategory1", "shutterstockCategory2", "isIllustration"]
                 }
               }
             });
@@ -1052,9 +1091,12 @@ function AdobeStockHub({ customApiKey, serviceAccount }: { customApiKey?: string
             status: 'completed', 
             title: data.title, 
             keywords: data.keywords,
-            category: data.category
+            category: data.adobeCategory,
+            shutterstockCategory1: data.shutterstockCategory1,
+            shutterstockCategory2: data.shutterstockCategory2,
+            isIllustration: data.isIllustration
           } : it));
-          return; // Success
+          return;
         } catch (error) {
           attempts++;
           if (attempts > maxRetries) {
@@ -1066,70 +1108,92 @@ function AdobeStockHub({ customApiKey, serviceAccount }: { customApiKey?: string
       }
     };
 
-    // Parallel processing with concurrency limit
     const concurrencyLimit = 3;
     const queue = [...newItems.map((item, index) => ({ item, file: files[index] }))];
-    
     const processQueue = async () => {
       while (queue.length > 0) {
-        const task = queue.shift();
-        if (task) {
-          await processItem(task.item, task.file);
-        }
+        const next = queue.shift();
+        if (next) await processItem(next.item, next.file);
       }
     };
-
     const workers = Array(Math.min(concurrencyLimit, newItems.length)).fill(null).map(() => processQueue());
     await Promise.all(workers);
     setIsProcessing(false);
-  }, [customApiKey, selectedModel]);
+  }, [customApiKey, selectedModel, serviceAccount]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
     const newItems: MetadataItem[] = acceptedFiles.map(file => ({
       id: Math.random().toString(36).substr(2, 9),
       filename: file.name,
+      type: file.type.startsWith('video/') ? 'video' : 'image',
       title: '',
       keywords: '',
       category: '',
+      shutterstockCategory1: '',
+      shutterstockCategory2: '',
       status: 'pending',
       previewUrl: URL.createObjectURL(file),
-      isGenerativeAI: globalGenerativeAI
+      isGenerativeAI: globalGenerativeAI,
+      isIllustration: true
     }));
     setItems(prev => [...prev, ...newItems]);
-    processAdobeMetadata(newItems, acceptedFiles);
-  }, [globalGenerativeAI, processAdobeMetadata]);
+    processMicrostock(newItems, acceptedFiles);
+  }, [globalGenerativeAI, processMicrostock]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop, 
-    accept: { 'image/*': [] }
+    accept: { 
+      'image/*': [],
+      'video/*': []
+    }
   } as any);
 
-  const downloadAdobeCSV = () => {
-    const data = items.filter(it => it.status === 'completed').map(it => {
-      let finalFilename = it.filename;
-      if (vectorMode) {
-        const lastDotIndex = it.filename.lastIndexOf('.');
-        const nameWithoutExt = lastDotIndex !== -1 ? it.filename.substring(0, lastDotIndex) : it.filename;
-        finalFilename = `${nameWithoutExt}_vector.ai`;
-      }
-
-      return {
-        'Filename': finalFilename,
-        'Title': it.title,
-        'Keywords': it.keywords,
-        'Category': it.category,
-        'Releases': '',
-        'Generative AI': it.isGenerativeAI ? 'Yes' : 'No'
-      };
-    });
-    const csv = Papa.unparse(data);
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `adobe-stock-upload-${new Date().getTime()}.csv`;
-    link.click();
+  const downloadCSV = () => {
+    if (activePlatform === 'adobe') {
+      const data = items.filter(it => it.status === 'completed').map(it => {
+        let finalFilename = it.filename;
+        if (vectorMode) {
+          const lastDotIndex = it.filename.lastIndexOf('.');
+          const nameWithoutExt = lastDotIndex !== -1 ? it.filename.substring(0, lastDotIndex) : it.filename;
+          finalFilename = `${nameWithoutExt}_vector.ai`;
+        }
+        return {
+          'Filename': finalFilename,
+          'Title': it.title,
+          'Keywords': it.keywords,
+          'Category': it.category,
+          'Releases': '',
+          'Generative AI': it.isGenerativeAI ? 'Yes' : 'No'
+        };
+      });
+      const csv = Papa.unparse(data);
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `adobe-metadata-${new Date().getTime()}.csv`;
+      link.click();
+    } else {
+      const data = items.filter(it => it.status === 'completed').map(it => {
+        return {
+          'Filename': it.filename,
+          'Description': it.title,
+          'Keywords': it.keywords,
+          'Categories': it.shutterstockCategory1 + (it.shutterstockCategory2 ? `,${it.shutterstockCategory2}` : ''),
+          'Editorial': 'no',
+          'Mature content': 'no',
+          'illustration': it.isIllustration ? 'yes' : 'no'
+        };
+      });
+      const csv = Papa.unparse(data);
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `shutterstock-metadata-${new Date().getTime()}.csv`;
+      link.click();
+    }
   };
 
   return (
@@ -1138,53 +1202,75 @@ function AdobeStockHub({ customApiKey, serviceAccount }: { customApiKey?: string
         <div className="flex-1 w-full space-y-4">
           <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm space-y-4">
             <h3 className="font-bold text-gray-900 flex items-center gap-2">
-              <ShieldCheck size={18} /> Adobe Stock Settings
+              <ShieldCheck size={18} /> Process Settings
             </h3>
+            
+            <div className="flex gap-1 p-1 bg-gray-50 rounded-2xl border border-gray-100">
+              <button 
+                onClick={() => setActivePlatform('adobe')}
+                className={cn(
+                  "flex-1 py-2 text-xs font-bold rounded-xl transition-all",
+                  activePlatform === 'adobe' ? "bg-white text-black shadow-sm" : "text-gray-400"
+                )}
+              >Adobe Stock</button>
+              <button 
+                onClick={() => setActivePlatform('shutterstock')}
+                className={cn(
+                  "flex-1 py-2 text-xs font-bold rounded-xl transition-all",
+                  activePlatform === 'shutterstock' ? "bg-white text-black shadow-sm" : "text-gray-400"
+                )}
+              >Shutterstock</button>
+            </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Optimization Model</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Model AI</label>
               <select 
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value as any)}
-                className="w-full p-3 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-black outline-none transition-all"
+                className="w-full p-3 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-black outline-none transition-all text-sm"
               >
-                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (High Accuracy)</option>
+                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Heavy)</option>
                 <option value="gemini-3-flash-preview">Gemini 3 Flash (Fast)</option>
-                <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Lite (Speed)</option>
+                <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Lite</option>
               </select>
             </div>
+            
             <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
-              <span className="text-sm font-medium">Generative AI Label</span>
+              <span className="text-xs font-medium">Generative AI Hub</span>
               <button 
                 onClick={() => setGlobalGenerativeAI(!globalGenerativeAI)}
                 className={cn(
-                  "w-12 h-6 rounded-full transition-all relative",
+                  "w-10 h-5 rounded-full transition-all relative",
                   globalGenerativeAI ? "bg-black" : "bg-gray-300"
                 )}
               >
                 <div className={cn(
-                  "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                  globalGenerativeAI ? "left-7" : "left-1"
+                  "absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all",
+                  globalGenerativeAI ? "left-5.5" : "left-0.5"
                 )} />
               </button>
             </div>
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
-              <div className="flex flex-col">
-                <span className="text-sm font-medium">Vector Mode (.ai)</span>
-                <span className="text-[10px] text-gray-400">PNG → _vector.ai</span>
+
+            {activePlatform === 'adobe' && (
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
+                <div className="flex flex-col">
+                  <span className="text-xs font-medium">Vector Mode (.ai)</span>
+                  <span className="text-[9px] text-gray-400">Add _vector.ai extension</span>
+                </div>
+                <button 
+                  onClick={() => setVectorMode(!vectorMode)}
+                  className={cn(
+                    "w-10 h-5 rounded-full transition-all relative",
+                    vectorMode ? "bg-blue-600" : "bg-gray-300"
+                  )}
+                >
+                  <div className={cn(
+                    "absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all",
+                    vectorMode ? "left-5.5" : "left-0.5"
+                  )} />
+                </button>
               </div>
-              <button 
-                onClick={() => setVectorMode(!vectorMode)}
-                className={cn(
-                  "w-12 h-6 rounded-full transition-all relative",
-                  vectorMode ? "bg-blue-600" : "bg-gray-300"
-                )}
-              >
-                <div className={cn(
-                  "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                  vectorMode ? "left-7" : "left-1"
-                )} />
-              </button>
-            </div>
+            )}
           </div>
         </div>
 
@@ -1194,12 +1280,12 @@ function AdobeStockHub({ customApiKey, serviceAccount }: { customApiKey?: string
         )}>
           <input {...getInputProps()} />
           <div className="space-y-4">
-            <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto group-hover:scale-110 transition-transform">
+            <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto group-hover:scale-110 transition-transform">
               <FileSpreadsheet size={32} className="text-gray-400" />
             </div>
             <div>
-              <h3 className="text-lg font-bold">Adobe Stock Hub</h3>
-              <p className="text-sm text-gray-400">Drop images here to generate Adobe-optimized metadata.</p>
+              <h3 className="text-lg font-bold">Upload to {activePlatform === 'adobe' ? 'Adobe' : 'Shutterstock'} Hub</h3>
+              <p className="text-sm text-gray-400">Analysis generates metadata for BOTH platforms automatically.</p>
             </div>
           </div>
         </div>
@@ -1207,18 +1293,18 @@ function AdobeStockHub({ customApiKey, serviceAccount }: { customApiKey?: string
 
       {items.length > 0 && (
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="font-bold text-gray-900">Batch Processing Queue ({items.length})</h3>
+          <div className="flex justify-between items-center px-2">
+            <h3 className="font-bold text-gray-900 text-lg text-left">Batch Processing ({items.length})</h3>
             <button 
-              onClick={downloadAdobeCSV}
+              onClick={downloadCSV}
               disabled={!items.some(it => it.status === 'completed')}
-              className="flex items-center gap-2 px-6 py-2.5 bg-black text-white rounded-2xl text-sm font-bold disabled:bg-gray-200 transition-all hover:shadow-lg active:scale-95"
+              className="flex items-center gap-2 px-6 py-2.5 bg-black text-white rounded-2xl text-sm font-bold disabled:bg-gray-200 transition-all hover:shadow-xl active:scale-95"
             >
-              <Download size={16} /> Export Adobe CSV
+              <Download size={16} /> Export {activePlatform === 'adobe' ? 'Adobe' : 'Shutterstock'} CSV
             </button>
           </div>
           
-          <div className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-1 gap-4 text-left">
             {items.map(item => (
               <motion.div 
                 layout
@@ -1226,34 +1312,62 @@ function AdobeStockHub({ customApiKey, serviceAccount }: { customApiKey?: string
                 className="bg-white p-4 rounded-3xl border border-gray-200 flex flex-col md:flex-row gap-6 items-start md:items-center"
               >
                 <div className="relative">
-                  <img src={item.previewUrl} className="w-24 h-24 rounded-2xl object-cover border border-gray-100" alt="" />
+                  {item.type === 'video' ? (
+                    <div className="w-24 h-24 rounded-2xl bg-gray-100 flex items-center justify-center border border-gray-100">
+                      <PlayCircle className="text-gray-400" size={32} />
+                    </div>
+                  ) : (
+                    <img src={item.previewUrl} className="w-24 h-24 rounded-2xl object-cover border border-gray-100" alt="" />
+                  )}
                   {item.status === 'processing' && (
                     <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] rounded-2xl flex items-center justify-center">
                       <Loader2 className="animate-spin text-black" size={24} />
+                    </div>
+                  )}
+                  {item.status === 'error' && (
+                    <div className="absolute inset-0 bg-red-50/60 backdrop-blur-[2px] rounded-2xl flex items-center justify-center">
+                      <AlertCircle className="text-red-500" size={24} />
                     </div>
                   )}
                 </div>
 
                 <div className="flex-1 min-w-0 space-y-1">
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-bold truncate">{item.filename}</p>
+                    <p className="text-sm font-bold truncate text-gray-700">{item.filename}</p>
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-[9px] font-bold rounded-md uppercase">
+                      {item.type}
+                    </span>
+                    {item.status === 'completed' && (
+                      <span className="px-2 py-0.5 bg-green-50 text-green-600 text-[10px] font-bold rounded-full border border-green-100 uppercase">Analyzed</span>
+                    )}
                   </div>
-                  <p className="text-xs text-gray-500 font-medium line-clamp-1">
-                    {item.title || (item.status === 'processing' ? 'Analyzing image...' : 'Pending...')}
+                  <p className="text-xs text-gray-500 font-medium line-clamp-1 italic">
+                    {item.title || (item.status === 'processing' ? `Analyzing ${item.type} with Gemini...` : item.status === 'error' ? 'Failed' : 'Waiting...')}
                   </p>
+                  {item.status === 'completed' && (
+                    <div className="flex flex-wrap gap-2 text-[10px] text-gray-400 font-medium py-1">
+                      <span className="px-2 py-0.5 bg-gray-50 rounded-lg">Adobe ID: {item.category}</span>
+                      <span className="px-2 py-0.5 bg-gray-50 rounded-lg whitespace-nowrap">
+                        SS Cat: {item.shutterstockCategory1}{item.shutterstockCategory2 ? ` & ${item.shutterstockCategory2}` : ''}
+                      </span>
+                      {item.type === 'image' && (
+                        <span className="px-2 py-0.5 bg-gray-50 rounded-lg uppercase">{item.isIllustration ? 'Illustration' : 'Photo'}</span>
+                      )}
+                    </div>
+                  )}
                   {item.keywords && (
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {item.keywords.split(',').slice(0, 5).map((kw, i) => (
-                        <span key={i} className="px-2 py-0.5 bg-gray-50 text-gray-400 text-[10px] rounded-md border border-gray-100">
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {item.keywords.split(',').slice(0, 6).map((kw, i) => (
+                        <span key={i} className="px-2 py-0.5 bg-gray-50 text-gray-400 text-[9px] rounded-md border border-gray-100">
                           {kw.trim()}
                         </span>
                       ))}
-                      <span className="text-[10px] text-gray-300">+{item.keywords.split(',').length - 5} more</span>
+                      <span className="text-[9px] text-gray-300">+{item.keywords.split(',').length - 6} more</span>
                     </div>
                   )}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 pr-2">
                   <button 
                     onClick={() => setItems(prev => prev.filter(it => it.id !== item.id))}
                     className="p-2 text-gray-300 hover:text-red-500 transition-colors"
@@ -1269,6 +1383,7 @@ function AdobeStockHub({ customApiKey, serviceAccount }: { customApiKey?: string
     </motion.div>
   );
 }
+
 
 function MarketTrends() {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
@@ -1488,18 +1603,76 @@ function Settings({
   serviceAccount: string,
   setServiceAccount: (val: string) => void
 }) {
+  const { user } = useAuth();
   const [authMode, setAuthMode] = useState<'api' | 'sa'>(serviceAccount ? 'sa' : 'api');
+  const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+  const [isSaving, setIsSaving] = useState(false);
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [testError, setTestError] = useState<string | null>(null);
+
+  const testConnection = async () => {
+    setTestStatus('testing');
+    setTestError(null);
+    try {
+      const response = await fetch('/api/vertex-ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serviceAccount,
+          model: 'gemini-1.5-flash',
+          prompt: 'Katakan "OK" jika koneksi berhasil.'
+        })
+      });
+      
+      const data = await response.json();
+      if (response.ok) {
+        setTestStatus('success');
+      } else {
+        throw new Error(data.error || 'Gagal terhubung ke Vertex AI');
+      }
+    } catch (err: any) {
+      setTestStatus('error');
+      setTestError(err.message);
+    }
+  };
+
+  const saveToProfile = async (updates: Partial<UserProfile>) => {
+    if (!user) return;
+    setIsSaving(true);
+    try {
+      const userDocRef = doc(db, 'users', user.uid);
+      await updateDoc(userDocRef, updates);
+    } catch (error) {
+      console.error("Error saving to profile:", error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    const checkServer = async () => {
+      try {
+        const res = await fetch('/api/health');
+        if (res.ok) setServerStatus('online');
+        else setServerStatus('offline');
+      } catch (e) {
+        setServerStatus('offline');
+      }
+    };
+    checkServer();
+  }, []);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const content = event.target?.result as string;
         try {
           JSON.parse(content); // Validate JSON
           setServiceAccount(content);
           setAuthMode('sa');
+          await saveToProfile({ serviceAccountJson: content });
         } catch (err) {
           alert("Invalid JSON file");
         }
@@ -1510,27 +1683,39 @@ function Settings({
 
   return (
     <div className="max-w-2xl mx-auto bg-white p-8 rounded-3xl border border-gray-200 shadow-sm">
-      <h2 className="text-xl font-bold mb-4">API Settings</h2>
-      <p className="text-sm text-gray-500 mb-6">Pilih metode autentikasi untuk menggunakan fitur AI.</p>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold">API Settings</h2>
+        <div className="flex items-center gap-3">
+          {isSaving && <Loader2 size={14} className="animate-spin text-blue-500" />}
+          <div className={cn(
+            "w-2 h-2 rounded-full",
+            serverStatus === 'online' ? "bg-green-500" : serverStatus === 'offline' ? "bg-red-500" : "bg-gray-300 animate-pulse"
+          )} />
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+            Server: {serverStatus}
+          </span>
+        </div>
+      </div>
+      <p className="text-sm text-gray-500 mb-6">Pilih metode autentikasi. Untuk <b>Qwiklabs</b>, gunakan <b>JSON Profile (Vertex)</b>.</p>
       
       <div className="flex gap-2 mb-8 bg-gray-50 p-1.5 rounded-2xl border border-gray-100">
         <button
           onClick={() => setAuthMode('api')}
           className={cn(
-            "flex-1 py-3 rounded-xl text-sm font-bold transition-all",
+            "flex-1 py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2",
             authMode === 'api' ? "bg-white text-black shadow-sm" : "text-gray-400 hover:text-gray-600"
           )}
         >
-          Gemini API Key
+          <Key size={16} /> API Key
         </button>
         <button
           onClick={() => setAuthMode('sa')}
           className={cn(
-            "flex-1 py-3 rounded-xl text-sm font-bold transition-all",
+            "flex-1 py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2",
             authMode === 'sa' ? "bg-white text-black shadow-sm" : "text-gray-400 hover:text-gray-600"
           )}
         >
-          Service Account (JSON)
+          <ShieldCheck size={16} /> JSON Profile (Vertex)
         </button>
       </div>
 
@@ -1540,13 +1725,22 @@ function Settings({
             <div className="flex items-center gap-2 text-sm font-bold text-gray-700">
               <Key size={16} /> Gemini API Key
             </div>
-            <input 
-              type="password" 
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Enter Gemini API Key"
-              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black outline-none"
-            />
+            <div className="relative">
+              <input 
+                type="password" 
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                onBlur={() => saveToProfile({ customApiKey: apiKey })}
+                placeholder="Enter Gemini API Key"
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black outline-none"
+              />
+              <button 
+                onClick={() => saveToProfile({ customApiKey: apiKey })}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-blue-600 hover:text-blue-800"
+              >
+                SAVE
+              </button>
+            </div>
             <div className="flex flex-col gap-2">
               <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
                 <ExternalLink size={12} /> Get your API key here
@@ -1555,25 +1749,58 @@ function Settings({
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="flex items-center gap-2 text-sm font-bold text-gray-700">
-              <ShieldCheck size={16} /> Service Account Key (JSON)
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-bold text-gray-700">
+                <ShieldCheck size={16} /> JSON Profile (Vertex)
+              </div>
+              <div className="flex items-center gap-2">
+                {serviceAccount && (
+                   <button 
+                   onClick={testConnection}
+                   disabled={testStatus === 'testing'}
+                   className={cn(
+                     "px-3 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all",
+                     testStatus === 'success' ? "bg-green-100 text-green-700" : 
+                     testStatus === 'error' ? "bg-red-100 text-red-700" :
+                     "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                   )}
+                 >
+                   {testStatus === 'testing' ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                   {testStatus === 'success' ? "CONNECTED" : testStatus === 'testing' ? "TESTING..." : "TEST CONNECTION"}
+                 </button>
+                )}
+                <button 
+                  onClick={() => saveToProfile({ serviceAccountJson: serviceAccount })}
+                  className="px-3 py-1 bg-black text-white rounded-lg text-[10px] font-bold hover:bg-gray-800"
+                >
+                  SAVE
+                </button>
+              </div>
             </div>
             <div className="relative">
               <textarea 
                 value={serviceAccount}
                 onChange={(e) => setServiceAccount(e.target.value)}
-                placeholder='Paste your Service Account JSON here...'
+                placeholder='Tempel JSON Service Account (profile) di sini...'
                 className="w-full h-48 px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black outline-none font-mono text-xs resize-none"
               />
               <div className="absolute bottom-4 right-4">
-                <label className="cursor-pointer bg-black text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-gray-800 transition-colors flex items-center gap-2">
+                <label className="cursor-pointer bg-white border border-gray-200 text-black px-4 py-2 rounded-lg text-xs font-bold hover:bg-gray-50 transition-colors flex items-center gap-2 shadow-sm">
                   <Plus size={14} /> Upload JSON
                   <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
                 </label>
               </div>
             </div>
+            {testStatus === 'error' && testError && (
+              <div className="p-3 bg-red-50 border border-red-100 rounded-xl flex items-start gap-2">
+                <AlertCircle size={14} className="text-red-500 mt-0.5 shrink-0" />
+                <p className="text-[10px] text-red-700 leading-relaxed font-medium">
+                  {testError}
+                </p>
+              </div>
+            )}
             <p className="text-[10px] text-gray-400 italic">
-              *Service Account Key digunakan untuk akses Vertex AI (Google Cloud). Data ini disimpan secara lokal di browser Anda.
+              *Metode ini mengambil token bearer secara otomatis dari JSON Profile Anda.
             </p>
           </div>
         )}
@@ -1617,7 +1844,7 @@ export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'batch' | 'promptGen' | 'adobeHub' | 'marketTrends' | 'settings' | 'admin'>('batch');
+  const [activeTab, setActiveTab] = useState<'batch' | 'promptGen' | 'microstock' | 'marketTrends' | 'settings' | 'admin'>('microstock');
   const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('gemini_api_key') || '');
   const [serviceAccount, setServiceAccount] = useState<string>(() => localStorage.getItem('service_account_json') || '');
 
@@ -1644,7 +1871,13 @@ export default function App() {
         const userDocRef = doc(db, 'users', firebaseUser.uid);
         const unsubProfile = onSnapshot(userDocRef, async (docSnap) => {
           if (docSnap.exists()) {
-            setProfile({ uid: docSnap.id, ...docSnap.data() } as UserProfile);
+            const data = docSnap.data() as UserProfile;
+            setProfile({ uid: docSnap.id, ...data } as UserProfile);
+            
+            // Sync from Firestore to local state if available
+            if (data.customApiKey) setCustomApiKey(data.customApiKey);
+            if (data.serviceAccountJson) setServiceAccount(data.serviceAccountJson);
+            
             setLoading(false);
           } else {
             const isAdmin = firebaseUser.email === 'aahdan298@gmail.com';
@@ -1734,10 +1967,10 @@ export default function App() {
                     label="Prompt Builder" 
                   />
                   <TabButton 
-                    active={activeTab === 'adobeHub'} 
-                    onClick={() => setActiveTab('adobeHub')} 
+                    active={activeTab === 'microstock'} 
+                    onClick={() => setActiveTab('microstock')} 
                     icon={FileSpreadsheet} 
-                    label="Adobe Stock Hub" 
+                    label="Microstock Hub" 
                   />
                   <TabButton 
                     active={activeTab === 'marketTrends'} 
@@ -1771,8 +2004,8 @@ export default function App() {
                   <div className={cn(activeTab !== 'promptGen' && "hidden")}>
                     <PromptBuilder customApiKey={customApiKey} serviceAccount={serviceAccount} />
                   </div>
-                  <div className={cn(activeTab !== 'adobeHub' && "hidden")}>
-                    <AdobeStockHub customApiKey={customApiKey} serviceAccount={serviceAccount} />
+                  <div className={cn(activeTab !== 'microstock' && "hidden")}>
+                    <MicrostockHub customApiKey={customApiKey} serviceAccount={serviceAccount} />
                   </div>
                   <div className={cn(activeTab !== 'marketTrends' && "hidden")}>
                     <MarketTrends />
