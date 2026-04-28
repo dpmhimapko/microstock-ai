@@ -107,6 +107,7 @@ interface UserProfile {
   createdAt: any;
   customApiKey?: string;
   serviceAccountJson?: string;
+  vertexLocation?: string;
 }
 
 interface AuthContextType {
@@ -384,7 +385,7 @@ const AdminDashboard = () => {
 
 // --- Feature Components (Original) ---
 
-function BatchImageGen({ customApiKey, serviceAccount }: { customApiKey?: string, serviceAccount?: string }) {
+function BatchImageGen({ customApiKey, serviceAccount, vertexLocation }: { customApiKey?: string, serviceAccount?: string, vertexLocation?: string }) {
   const [promptsText, setPromptsText] = useState('');
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
   const [selectedModel, setSelectedModel] = useState<string>('gemini-2.5-flash-image');
@@ -454,6 +455,7 @@ function BatchImageGen({ customApiKey, serviceAccount }: { customApiKey?: string
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               serviceAccount,
+              location: vertexLocation,
               model: selectedModel,
               prompt: currentImage.prompt,
               isImageGen: true,
@@ -698,7 +700,7 @@ function BatchImageGen({ customApiKey, serviceAccount }: { customApiKey?: string
   );
 }
 
-function PromptBuilder({ customApiKey, serviceAccount }: { customApiKey?: string, serviceAccount?: string }) {
+function PromptBuilder({ customApiKey, serviceAccount, vertexLocation }: { customApiKey?: string, serviceAccount?: string, vertexLocation?: string }) {
   const [concept, setConcept] = useState('');
   const [brief, setBrief] = useState('');
   const [count, setCount] = useState<number | string>(5);
@@ -767,6 +769,7 @@ function PromptBuilder({ customApiKey, serviceAccount }: { customApiKey?: string
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             serviceAccount,
+            location: vertexLocation,
             model: selectedModel,
             prompt,
             mimeType: file?.type,
@@ -989,7 +992,7 @@ function PromptBuilder({ customApiKey, serviceAccount }: { customApiKey?: string
   );
 }
 
-function MicrostockHub({ customApiKey, serviceAccount }: { customApiKey?: string, serviceAccount?: string }) {
+function MicrostockHub({ customApiKey, serviceAccount, vertexLocation }: { customApiKey?: string, serviceAccount?: string, vertexLocation?: string }) {
   const [items, setItems] = useState<MetadataItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-3.1-pro-preview' | 'gemini-3.1-flash-lite-preview'>('gemini-3-flash-preview');
@@ -1039,6 +1042,7 @@ function MicrostockHub({ customApiKey, serviceAccount }: { customApiKey?: string
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 serviceAccount,
+                location: vertexLocation,
                 model: selectedModel,
                 prompt,
                 mimeType: file.type,
@@ -1596,14 +1600,18 @@ function Settings({
   apiKey, 
   setApiKey,
   serviceAccount,
-  setServiceAccount
+  setServiceAccount,
+  vertexLocation,
+  setVertexLocation
 }: { 
   apiKey: string, 
   setApiKey: (val: string) => void,
   serviceAccount: string,
-  setServiceAccount: (val: string) => void
+  setServiceAccount: (val: string) => void,
+  vertexLocation: string,
+  setVertexLocation: (val: string) => void
 }) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [authMode, setAuthMode] = useState<'api' | 'sa'>(serviceAccount ? 'sa' : 'api');
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
   const [isSaving, setIsSaving] = useState(false);
@@ -1621,6 +1629,7 @@ function Settings({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           serviceAccount,
+          location: vertexLocation,
           model: 'gemini-1.5-flash',
           prompt: 'Katakan "OK" jika koneksi berhasil.'
         })
@@ -1785,6 +1794,17 @@ function Settings({
                 <ShieldCheck size={16} /> JSON Profile (Vertex)
               </div>
               <div className="flex items-center gap-2">
+                <select 
+                  value={vertexLocation}
+                  onChange={(e) => setVertexLocation(e.target.value)}
+                  className="px-2 py-1 bg-white border border-gray-200 rounded-lg text-[10px] font-bold text-gray-600 focus:ring-1 focus:ring-black outline-none"
+                >
+                  <option value="us-central1">us-central1 (Iowa)</option>
+                  <option value="us-east1">us-east1 (S. Carolina)</option>
+                  <option value="us-west1">us-west1 (Oregon)</option>
+                  <option value="asia-southeast1">asia-southeast1 (Singapore)</option>
+                  <option value="europe-west4">europe-west4 (Netherlands)</option>
+                </select>
                 {serviceAccount && (
                   <>
                    <button 
@@ -1811,7 +1831,13 @@ function Settings({
                   </>
                 )}
                 <button 
-                  onClick={() => saveToProfile({ serviceAccountJson: serviceAccount })}
+                  onClick={() => {
+                    saveToProfile({ 
+                      serviceAccountJson: serviceAccount,
+                      vertexLocation: vertexLocation
+                    });
+                    localStorage.setItem('vertex_location', vertexLocation);
+                  }}
                   className="px-3 py-1 bg-black text-white rounded-lg text-[10px] font-bold hover:bg-gray-800"
                 >
                   SAVE
@@ -1851,6 +1877,10 @@ function Settings({
                 </label>
               </div>
             </div>
+            <p className="text-[10px] text-gray-500 bg-gray-50 p-2 rounded-lg border border-gray-100 flex items-center gap-2">
+              <AlertCircle size={12} className="text-blue-500" />
+              <b>Smart Fallback Aktif:</b> Jika Vertex AI (403/Forbidden) gagal, app akan otomatis mencoba Gemini API via Token.
+            </p>
             {testStatus === 'error' && testError && (
               <div className="p-3 bg-red-50 border border-red-100 rounded-xl flex items-start gap-2">
                 <AlertCircle size={14} className="text-red-500 mt-0.5 shrink-0" />
@@ -1907,6 +1937,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'batch' | 'promptGen' | 'microstock' | 'marketTrends' | 'settings' | 'admin'>('microstock');
   const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('gemini_api_key') || '');
   const [serviceAccount, setServiceAccount] = useState<string>(() => localStorage.getItem('service_account_json') || '');
+  const [vertexLocation, setVertexLocation] = useState<string>(() => localStorage.getItem('vertex_location') || 'us-central1');
 
   useEffect(() => {
     if (customApiKey) {
@@ -2059,13 +2090,13 @@ export default function App() {
               ) : (
                 <div className="space-y-8">
                   <div className={cn(activeTab !== 'batch' && "hidden")}>
-                    <BatchImageGen customApiKey={customApiKey} serviceAccount={serviceAccount} />
+                    <BatchImageGen customApiKey={customApiKey} serviceAccount={serviceAccount} vertexLocation={vertexLocation} />
                   </div>
                   <div className={cn(activeTab !== 'promptGen' && "hidden")}>
-                    <PromptBuilder customApiKey={customApiKey} serviceAccount={serviceAccount} />
+                    <PromptBuilder customApiKey={customApiKey} serviceAccount={serviceAccount} vertexLocation={vertexLocation} />
                   </div>
                   <div className={cn(activeTab !== 'microstock' && "hidden")}>
-                    <MicrostockHub customApiKey={customApiKey} serviceAccount={serviceAccount} />
+                    <MicrostockHub customApiKey={customApiKey} serviceAccount={serviceAccount} vertexLocation={vertexLocation} />
                   </div>
                   <div className={cn(activeTab !== 'marketTrends' && "hidden")}>
                     <MarketTrends />
@@ -2076,6 +2107,8 @@ export default function App() {
                       setApiKey={setCustomApiKey} 
                       serviceAccount={serviceAccount}
                       setServiceAccount={setServiceAccount}
+                      vertexLocation={vertexLocation}
+                      setVertexLocation={setVertexLocation}
                     />
                   </div>
                 </div>
